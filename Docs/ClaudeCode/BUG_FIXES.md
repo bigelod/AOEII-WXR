@@ -1,0 +1,215 @@
+# BUG_FIXES — defect register
+
+**What this file is.** No code in this repository has been built or run yet,
+so there are no fixed bugs to report. What follows is a **defect register for
+the inherited skeleton** in `Docs/MetaAI/Phase1Proj`, found by reading it.
+
+That makes this file preventative rather than historical: these are the things
+**not to reintroduce** when the real source tree is written at Stage 2. Each
+item is cheaper to avoid than to debug on a headset with no debugger.
+
+Items are numbered and the numbers are referenced from the other documents in
+this folder — **do not renumber**. Append new items; mark fixed ones with the
+commit that fixed them.
+
+Every finding below is **[static]** — read from the source, not observed at
+runtime. Several would be caught by the first compile; the interesting ones
+would not.
+
+---
+
+## Would not compile or load
+
+### 1. `ddraw.dll` proxy can load itself under Wine, and recurse until the stack dies
+
+`proxy.cpp` resolves the real DirectDraw with
+`LoadLibraryA("C:\\windows\\system32\\ddraw.dll")`, while the README sets
+`WINEDLLOVERRIDES=ddraw=n,b`.
+
+**Wine applies DLL overrides by module name, not by path.** That call can
+therefore resolve back to our own already-loaded module; `GetProcAddress` then
+returns our own `DirectDrawCreate`, and the first call recurses until the
+stack is exhausted. Wine's builtin ddraw is a `.dll.so`, so there is no PE
+file to copy aside and rename — the usual escape hatch does not exist.
+
+**Status:** avoided by design. `PROJECT_OVERVIEW.md` section 4 moves the
+injection vector to `version.dll` + MinHook, which never impersonates a module
+whose functionality we need. If a `ddraw` proxy is ever revisited, the real
+module must be resolved by something other than its name.
+
+### 2. The vtable indices are correct — recorded so nobody re-derives them
+
+The MetaAI notes list these as *"assumed from SDK — needs log verification"*,
+and they are in fact right, which is worth writing down once:
+
+| Interface | Method | Index |
+|---|---|---|
+| `IDirectDrawSurface7` | `Blt` | 5 |
+| `IDirectDrawSurface7` | `BltFast` | 7 |
+| `IDirectDrawSurface7` | `Flip` | 11 |
+| `IDirectDraw7` | `CreateSurface` | 6 |
+
+Counting from the three `IUnknown` slots at 0–2, in declaration order. **[static]**
+
+**Not a bug — but it does not rescue item 4**, which is about which
+*interface* the game asks for, not which slot a method occupies.
+
+### 3. Pixel format is assumed to be 32bpp, so a palettized surface renders as garbage
+
+`d3d11_renderer.cpp`, uploading the locked surface:
+
+```
+memcpy(dst + y * mp.RowPitch, src + y * d.lPitch, w * 4);
+```
+
+`w * 4` is the destination's bytes-per-row. The **source** may be 8 or 16
+bits per pixel, in which case this reads up to four times the real row width —
+garbage output, and a read past the end of the surface on the last row. The
+MetaAI notes acknowledge the palette gap but the code does not guard it.
+
+**AoE2 at this patch level plausibly runs 8-bit palettized**, which makes this
+the default path, not an edge case.
+
+**Fix at Stage 6:** read `ddpfPixelFormat` and branch. For a palettized
+surface, read the DirectDraw palette, build a 256-entry lookup table, rebuild
+it when the palette changes, and convert per row. Never copy `lPitch` bytes
+blindly either — pitch is not width.
+
+### 4. Only the `7` interfaces are hooked, and the game may never ask for them
+
+`proxy.cpp` QueryInterfaces to `IID_IDirectDraw7`; `hooks.cpp` patches
+`IDirectDrawSurface7`. A 1999 title may well create its surfaces through
+`IDirectDraw2` or `IDirectDraw4` and draw through `IDirectDrawSurface3`, in
+which case `Hooked_CreateSurface` never fires and nothing downstream of it
+ever runs.
+
+**Status:** this is the question Stage A answers out of the binary's imports
+and GUIDs. Do not write hooking code before it is answered.
+
+### 5. `hooks.cpp` uses `std::vector` without including `<vector>`
+
+Caught by the first compile. Noted only because it confirms the skeleton has
+never been built.
+
+---
+
+## Would compile, and then mislead
+
+### 6. The logger has no build stamp, which the framework calls non-negotiable
+
+`general_wxr/CLAUDE.md`: embed `__DATE__ __TIME__`, log it on line 1, and make
+the deploy script refuse a binary older than the newest source file. The
+inherited logger writes `"=== AoE2 Phase1 Log Started ==="` and no stamp.
+
+**Why this matters more than it looks:** testing a stale build is invisible
+without the check, and it wastes an entire session when it happens. Fix at
+Stage 2, together with the deploy script's freshness guard — both before there
+is anything complicated to debug.
+
+### 7. `Logger::Init` is unsynchronised and `init` is not atomic
+
+`Log()` calls `Init()` when not initialised; `Init()` sets `init = true`
+*before* calling `Log()`, which is what stops the recursion the MetaAI notes
+describe as a fixed deadlock. But `Init()` never takes the mutex, and `init`
+is a plain `bool`. Two threads reaching `Log()` first can both run `Init()`,
+both `CreateFileW` with `CREATE_ALWAYS`, and leak a handle while truncating
+each other's output.
+
+DirectDraw games are not reliably single-threaded, and we are adding a thread
+of our own.
+
+**Fix:** initialise explicitly from `DllMain` (which the skeleton already
+does) and make `Log()` a no-op before that, rather than self-initialising.
+
+### 8. Hardcoded `C:\` log path, with the documented fallback missing from the code
+
+`BUG_FIXES.md` in `Docs/MetaAI/` claims *"added Z:\tmp fallback"*. The code
+writes `C:\aoe2_phase1_log.txt` unconditionally. The claim and the code
+disagree, and the code is what runs.
+
+**Fix:** write next to our own DLL, which is always writable and always
+findable by the owner. Use the `Z:\` test for "am I on a headset?" only, as
+the Black and White port does.
+
+### 9. Viewport is sized to the texture, not the render target
+
+`RenderFromLockedSurface` sets `D3D11_VIEWPORT{0, 0, tw, th, 0, 1}`, where
+`tw`/`th` are the *source surface* dimensions. When the container resolution
+differs from the game's surface size — which is the normal case, and is the
+whole supersampling story — the viewport covers part of the window and the
+sync pixel's corner is no longer where the runtime samples.
+
+**Fix:** viewport from the backbuffer, always. And handle the backbuffer
+changing size.
+
+### 10. The primary surface is locked in full, every frame
+
+`Hooked_Flip` calls `Lock(NULL, ..., DDLOCK_READONLY | DDLOCK_WAIT, NULL)` on
+the flipping surface on every frame. A full blocking lock of a primary surface
+is a performance cliff on real hardware and a likely stall under Wine, where
+it may also fail outright or contend with the runtime's own window capture.
+
+**Fix:** treat it as one of the three candidates in Spike S3, not as the
+chosen design. Lock a dirty rect rather than the whole surface if this route
+survives at all.
+
+### 11. Two presenters on one window, with no evidence either survives
+
+`Hooked_Flip` suppresses the game's `Flip` and returns `DD_OK` after
+presenting its own D3D11 swapchain on the same HWND. This may work, may
+flicker, or may deadlock — it has never been run.
+
+**Status:** promoted from a bug to **Spike S3**, with three ranked answers.
+It is the one architectural unknown that reading cannot settle.
+
+### 12. One global `Real_*` pointer per hooked method, across all vtables
+
+`HookSurface7` dedupes by vtable pointer in a function-static `std::vector`
+with no synchronisation, and stores the originals in single globals. Today the
+dedupe hides the problem. The moment a second interface version is hooked —
+which item 4 makes likely — the second `InstallVTableHook` overwrites the
+first's original pointer and calls into the wrong trampoline.
+
+**Fix:** key the originals per vtable, or use MinHook and let it own them.
+
+### 13. `proxy.def` exports ten names; real `ddraw.dll` exports many more
+
+Missing: `AcquireDDThreadLock`, `ReleaseDDThreadLock`, `SetAppCompatData`,
+`DDInternalLock`/`Unlock`, `DDGetAttachedSurfaceLcl`, `GetDDSurfaceLocal`,
+`GetOLEThunkData`, `D3DParseUnknownCommand`, `CompleteCreateSysmemSurface`,
+`DSoundHelp`, `RegisterSpecialCase` and others. Anything importing one of them
+fails to load. The fixed ordinals (`@1`–`@10`) are also arbitrary and do not
+match the real module's.
+
+**Status:** moot once item 1's fix lands, since `version.dll` has a handful of
+exports and nothing depends on our forwarding being complete.
+
+---
+
+## Not bugs, but wrong
+
+### 14. The MetaAI architecture description is factually incorrect
+
+*"D3D11 -> DXVK -> Vulkan -> OpenXR. D3D11 emitted shows up in VR."*
+WinlatorXR captures the **game window**; it does not hook a renderer or read a
+swapchain, and no OpenXR is involved in a mod's path. Corrected in full at
+`PROJECT_OVERVIEW.md` section 7.
+
+Consequence: the inherited plan has no sync pixel, no window handling and no
+XrApi client — three of the framework's non-negotiables — because it believed
+none were needed.
+
+### 15. The target patch level and executable are wrong
+
+Those docs target *"1.0c and HD"* and `empires2.exe`. This project is AoK
+v2.0a + Conquerors v1.0c + **UserPatch 1.5**, which runs from the expansion
+executable. Treat every inherited address, offset and exe name as suspect —
+UserPatch 1.5 is a different binary, so published stock-1.0c offsets will not
+match.
+
+### 16. One entry in the MetaAI list is not a bug fix at all
+
+*"Reddit domain blocked — worked around by analyzing uploaded video
+instead"* — a tooling limitation of that session, recorded as a code fix. Not
+carried forward. Noted only because it is a reminder to keep this file for
+defects in **our** code, so that it stays worth reading.

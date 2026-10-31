@@ -1,0 +1,16 @@
+#include "hooks.h"
+#include "logger.h"
+#include "d3d11_renderer.h"
+typedef HRESULT (WINAPI *BltFast_t)(LPDIRECTDRAWSURFACE7,DWORD,DWORD,LPDIRECTDRAWSURFACE7,LPRECT,DWORD);
+typedef HRESULT (WINAPI *Blt_t)(LPDIRECTDRAWSURFACE7,LPRECT,LPDIRECTDRAWSURFACE7,LPRECT,DWORD,DDBLTFX*);
+typedef HRESULT (WINAPI *Flip_t)(LPDIRECTDRAWSURFACE7,LPDIRECTDRAWSURFACE7,DWORD);
+typedef HRESULT (WINAPI *CreateSurface_t)(LPDIRECTDRAW7,LPDDSURFACEDESC2,LPDIRECTDRAWSURFACE7*,IUnknown*);
+BltFast_t Real_BltFast=nullptr; Blt_t Real_Blt=nullptr; Flip_t Real_Flip=nullptr; CreateSurface_t Real_CreateSurface=nullptr;
+extern D3D11Renderer g_renderer; int g_flipCount=0;
+bool InstallVTableHook(void** vtable,int idx,void* nf,void** oldf){ if(!vtable) return false; DWORD op; if(!VirtualProtect(&vtable[idx],sizeof(void*),PAGE_EXECUTE_READWRITE,&op)) return false; if(oldf) *oldf=vtable[idx]; vtable[idx]=nf; VirtualProtect(&vtable[idx],sizeof(void*),op,&op); return true; }
+HRESULT WINAPI Hooked_BltFast(LPDIRECTDRAWSURFACE7 self,DWORD x,DWORD y,LPDIRECTDRAWSURFACE7 src,LPRECT rect,DWORD trans){ if(rect){ DDSURFACEDESC2 d={}; d.dwSize=sizeof(d); if(src&&src->GetSurfaceDesc(&d)==DD_OK) Logger::LogBltFast((int)x,(int)y,*rect,(int)d.dwWidth,(int)d.dwHeight); else Logger::LogBltFast((int)x,(int)y,*rect,0,0);} if(Real_BltFast) return Real_BltFast(self,x,y,src,rect,trans); return DD_OK; }
+HRESULT WINAPI Hooked_Blt(LPDIRECTDRAWSURFACE7 self,LPRECT dst,LPDIRECTDRAWSURFACE7 src,LPRECT sr,DWORD f,DDBLTFX* fx){ static int c=0; c++; if(c<50) Logger::Log("[Blt #%d]\n",c); if(Real_Blt) return Real_Blt(self,dst,src,sr,f,fx); return DD_OK; }
+HRESULT WINAPI Hooked_Flip(LPDIRECTDRAWSURFACE7 self,LPDIRECTDRAWSURFACE7 tgt,DWORD fl){ g_flipCount++; Logger::LogFlip(g_flipCount); if(g_flipCount==10){ HWND hw=GetActiveWindow(); if(!hw) hw=GetForegroundWindow(); if(hw){ if(g_renderer.Init(hw)) Logger::Log("D3D11 OK hwnd=%p\n",hw); else Logger::Log("D3D11 FAIL\n"); } } if(g_renderer.IsInitialized()&&g_flipCount>10){ DDSURFACEDESC2 d={}; d.dwSize=sizeof(d); if(self->Lock(NULL,&d,DDLOCK_READONLY|DDLOCK_WAIT,NULL)==DD_OK){ g_renderer.RenderFromLockedSurface(d); self->Unlock(NULL); g_renderer.Present(); return DD_OK; } } if(Real_Flip) return Real_Flip(self,tgt,fl); return DD_OK; }
+HRESULT WINAPI Hooked_CreateSurface(LPDIRECTDRAW7 self,LPDDSURFACEDESC2 desc,LPDIRECTDRAWSURFACE7* surf,IUnknown* unk){ HRESULT hr=Real_CreateSurface?Real_CreateSurface(self,desc,surf,unk):DDERR_GENERIC; if(hr==DD_OK&&surf&&*surf){ Logger::LogSurfaceCreate((int)desc->dwWidth,(int)desc->dwHeight,(int)desc->ddpfPixelFormat.dwRGBBitCount); HookSurface7(*surf);} return hr; }
+void HookSurface7(LPDIRECTDRAWSURFACE7 pSurf){ if(!pSurf) return; void** vtbl=*(void***)pSurf; static std::vector<void**> hooked; for(auto v:hooked) if(v==vtbl) return; hooked.push_back(vtbl); InstallVTableHook(vtbl,7,(void*)Hooked_BltFast,(void**)&Real_BltFast); InstallVTableHook(vtbl,5,(void*)Hooked_Blt,(void**)&Real_Blt); InstallVTableHook(vtbl,11,(void*)Hooked_Flip,(void**)&Real_Flip); Logger::Log("Hooked Surface vtable %p\n",vtbl); }
+void HookDirectDraw7(LPDIRECTDRAW7 pDD){ if(!pDD) return; void** vtbl=*(void***)pDD; InstallVTableHook(vtbl,6,(void*)Hooked_CreateSurface,(void**)&Real_CreateSurface); Logger::Log("Hooked DD7 CreateSurface\n"); }

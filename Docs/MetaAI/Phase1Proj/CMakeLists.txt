@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.15)
+project(aoe2_phase1_ddraw CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(ddraw SHARED src/dllmain.cpp src/proxy.cpp src/hooks.cpp src/logger.cpp src/d3d11_renderer.cpp)
+target_include_directories(ddraw PRIVATE src)
+target_link_libraries(ddraw PRIVATE d3d11 dxgi d3dcompiler)
+set_target_properties(ddraw PROPERTIES OUTPUT_NAME "ddraw" SUFFIX ".dll" PREFIX "")

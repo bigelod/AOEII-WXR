@@ -1,0 +1,12 @@
+LIBRARY ddraw
+EXPORTS
+  DirectDrawCreate @1
+  DirectDrawCreateEx @2
+  DirectDrawCreateClipper @3
+  DirectDrawEnumerateA @4
+  DirectDrawEnumerateW @5
+  DirectDrawEnumerateExA @6
+  DirectDrawEnumerateExW @7
+  DllGetClassObject @8
+  DllCanUnloadNow @9
+  GetSurfaceFromDC @10
