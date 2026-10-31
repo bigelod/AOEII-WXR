@@ -64,12 +64,13 @@ precisely for this genre. So:
 
 | Question | Answer |
 |---|---|
-| Game, version, patch level | Age of Empires II: The Age of Kings **v2.0a**, The Conquerors Expansion **v1.0c**, **UserPatch 1.5** **[owner]** |
-| Store or distribution | TBD — matters only for whether the install can be scripted |
+| Game, version, patch level | AoK base + The Conquerors **1.0c** — confirmed from the version resource: `AGE2_X1.EXE`, FileVersion `00.07.26.0809`, "Age of Empires II Expansion", Microsoft Corp. 2001 **[measured]**. **UserPatch 1.5 is *not* installed on the inspected copy** — see section 2a |
+| Executable | `age2_x1/age2_x1.exe`, 3,145,728 bytes. **Not `empires2.exe`**, which is the base-game binary **[measured]** |
+| Store or distribution | A no-CD/repack build: the exe carries four non-standard appended sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch` at 0x6c000 bytes) alongside the original 2001 link timestamp **[measured]**. Consequence: **this is already a modified binary**, so published offsets for a pristine 1.0c need re-finding regardless of patch level |
 | Install path (target) | `D:/VR/AoE2-WXR` — does not exist yet, will be created **[owner]** |
-| Install path (for inspection) | TBD — owner is copying the game files to this machine **[owner]** |
-| Bitness | 32-bit **[unverified — confirm with `dumpbin /headers`]** |
-| Renderer | DirectDraw **[unverified — which interface version is the open question, section 5]** |
+| Install path (for inspection) | A local path on the owner's machine, **deliberately not recorded in this repository** **[owner]** |
+| Bitness | **32-bit confirmed** — PE32, machine `0x014c` (i386), image base `0x00400000`, subsystem 2 (GUI) **[measured]** |
+| Renderer | **DirectDraw only, and nothing else.** The exe imports exactly one function from `DDRAW.dll` — `DirectDrawCreate` — and imports **no** `d3d*.dll` at all; the strings `D3D`, `Direct3D` and `ddraw` do not occur **[measured]**. The interface-version question is settled in section 2b |
 | Engine | Genie (in-house, Ensemble Studios) |
 | Source available? | No. No source release, no SDK. |
 | Mod API? | None for rendering. UserPatch 1.5 adds data and AI extensibility, not a render hook. |
@@ -101,6 +102,121 @@ precisely for this genre. So:
 | Release-owned files | None yet. Declare them here before automation touches a `Release/` folder. |
 | Who verifies on hardware | The owner, on a Quest 3. Every milestone ends with them, not with me. |
 | Prior work to inherit | Only `Docs/MetaAI/Phase1Proj` **[owner]**. Its proxy shape is partly reusable; its architecture rests on a factual error (section 7). |
+
+---
+
+## 2a. Stage A findings — what the binary says
+
+Read from the owner's local copy with a PE import-table reader and a GUID
+search. All **[measured]**, and three of them change the plan.
+
+### UserPatch 1.5 is not installed — an open decision
+
+The project was specified as *v2.0a + Expansion 1.0c + UserPatch 1.5*
+**[owner]**, but the inspected copy has **no UserPatch on it**: no
+`age2_x1.5.exe` (UserPatch installs a separate executable and does not
+overwrite `age2_x1.exe`), no `Script.Ai/` or `Script.Rm/`, no `.per` files,
+and the string `UserPatch` does not occur anywhere in the binary. The `AI/`
+folder contains a single `AI.txt`.
+
+What *is* present: a no-CD patched 1.0c, plus two local DLL overrides already
+in use — `winmx.dll` (an OGG-WinMM build, a renamed `winmm` wrapper that
+plays the CD soundtrack from files; configured by `winmx.ini`) and a
+replacement `dsound.dll`.
+
+**This is a decision for the owner, not an error to correct silently**, and it
+matters in three places: UserPatch changes the executable (so every offset
+found for one is wrong for the other), it is what provides custom and
+widescreen resolutions, and it changes multiplayer behaviour. Until it is
+settled, treat the target as **stock Conquerors 1.0c** — which is what can
+actually be measured today.
+
+One piece of incidental good news: the install **already demonstrates
+local-DLL redirection working for this game**, twice. Adding a third is
+normal here, not novel.
+
+### 2b. The game cannot use the DirectDraw 7 interfaces
+
+The decisive measurement. The binary carries a contiguous GUID table holding
+`CLSID_DirectDraw`, `IID_IDirectDraw`, `IID_IDirectDraw2`,
+`IID_IDirectDraw4`, `IID_IDirectDrawSurface`, `IID_IDirectDrawSurface2`,
+`IID_IDirectDrawSurface3`, `IID_IDirectDrawSurface4`,
+`IID_IDirectDrawPalette` and `IID_IDirectDrawClipper`.
+
+**`IID_IDirectDraw7` and `IID_IDirectDrawSurface7` are absent** — from both
+`age2_x1.exe` and `empires2.exe`. A binary cannot `QueryInterface` for a GUID
+it does not contain, so the game provably never uses those interfaces. It
+enters through `DirectDrawCreate`, which returns `IDirectDraw` (version 1),
+and the highest it can climb is **DD4 / Surface4**.
+
+**The inherited skeleton therefore could never have worked, for a subtler
+reason than "wrong index".** Its indices are right (`BUG_FIXES.md` item 2) and
+its `QueryInterface(IID_IDirectDraw7)` would have *succeeded* — real
+`ddraw.dll` implements DD7 whether the game wants it or not. But each
+interface version has its **own vtable**, so patching DD7's `CreateSurface`
+slot intercepts nothing the game does through DD1/2/4. It would have hooked
+successfully and logged nothing, which is the worst kind of failure to debug
+on a headset.
+
+**Design consequence: wrap, do not vtable-patch.** Return our own wrapper from
+`DirectDrawCreate` and wrap `QueryInterface`, so every interface the game asks
+for is observed and wrapped as it is handed over. Which version it actually
+uses then becomes a log line on the first run instead of a guess, and we stop
+caring about the answer.
+
+The method indices are stable across versions, which helps: `Blt` = 5,
+`BltFast` = 7, `Flip` = 11 on every `IDirectDrawSurface*`, and
+`CreateSurface` = 6 on every `IDirectDraw*` — later versions append methods
+rather than reordering them. The one real difference is the surface
+description struct: `DDSURFACEDESC` for versions 1–3, `DDSURFACEDESC2` for 4
+and 7.
+
+### 2c. The laser pointer is far less risky than feared
+
+The biggest de-risking of the session. From `USER32.dll` the exe imports
+`GetCursorPos`, `SetCursorPos`, `ClipCursor`, `GetKeyState`,
+`GetAsyncKeyState`, `GetKeyboardState`, `ClientToScreen` and `ScreenToClient`
+— and it imports **no DirectInput at all** (`DINPUT`/`dinput8` do not appear
+in the import table).
+
+So the game reads the mouse through plain Win32 `GetCursorPos`. Route 1 of
+Spike S1 — hook the game's own mouse read and return the point we computed
+from the controller ray — is a straightforward IAT hook on a documented
+function, with nothing in Wine, X11 or the window manager getting a vote. The
+spike still runs, but its expected outcome has moved from "hope one of four
+works" to "confirm the obvious one does".
+
+Two cautions that come with it. The game calls **`SetCursorPos` and
+`ClipCursor` itself**, so it has opinions about where the cursor is and will
+contend with ours — which is another argument for owning `GetCursorPos`
+rather than pushing the real cursor around. And keyboard state is read
+through `GetKeyState` / `GetAsyncKeyState`, so map scrolling can be fed by
+the same technique instead of synthesising events.
+
+### 2d. The 8-bit palette path is the default, not an edge case
+
+From `GDI32.dll` the exe imports `CreatePalette`, `SelectPalette`,
+`RealizePalette`, `ResizePalette`, `GetPaletteEntries`, `SetPaletteEntries`,
+`GetSystemPaletteEntries` and `GetNearestPaletteIndex` — the full palette API,
+which a game only needs in a palettized display mode.
+
+`BUG_FIXES.md` item 3 is therefore not a defensive note about an unlikely
+format; it is the **main path**, and the inherited code's `w * 4` copy would
+produce garbage on the very first frame. Read the palette, build a 256-entry
+lookup table, rebuild it when `SetPaletteEntries` is called.
+
+### 2e. The injection vector is available — with one correction
+
+`VERSION.dll` **is** imported, so the preferred vector exists **[measured]**.
+But correct one thing claimed in section 4: the game imports three real
+functions from it — `GetFileVersionInfoA`, `GetFileVersionInfoSizeA`,
+`VerQueryValueA` — so our proxy **must forward those three properly**. It is
+still three functions against `ddraw.dll`'s dozen-plus, so the argument holds;
+it just is not quite "nothing depends on our forwarding".
+
+The `dinput8.dll` fallback named in section 4 **does not exist** — there is no
+DirectInput import to proxy. Replace it in the ranking with `MSVFW32.dll`, or
+with the `winmm`-style redirection this install already proves works.
 
 ---
 
@@ -159,22 +275,23 @@ we actually need, and costs two real problems:
    `SetAppCompatData`, `DDInternalLock`, `GetOLEThunkData` and others. A
    missing export is a load failure for anything that imports it.
 
-Neither problem exists if we inject through a DLL whose *functionality* we do
-not need. `version.dll` is loaded very early by almost everything and almost
-never actually used (`TOOLS.md`), so forwarding it is trivial and nothing
-depends on our forwarding being complete. Once loaded, we hook the genuine
+Neither problem exists if we inject through a DLL with a small, simple export
+surface. `version.dll` is loaded very early by almost everything (`TOOLS.md`),
+and AoE2 imports exactly three functions from it **[measured, section 2e]** —
+so forwarding it is three thunks rather than a dozen-plus. Once loaded, we hook the genuine
 `ddraw.dll` with MinHook — which is what we wanted all along, and which works
 identically whichever DirectDraw interface version the game uses.
 
 | | `ddraw.dll` proxy | `version.dll` + MinHook |
 |---|---|---|
-| Must forward exports correctly | all of them | effectively none |
+| Must forward exports correctly | a dozen-plus | three **[measured]** |
 | Risk of loading ourselves | **real** | none |
 | Reaches DirectDraw | directly | via one hook |
 | Needs `WINEDLLOVERRIDES` | `ddraw=n,b` | `version=n,b` |
 
-**Fallbacks, ranked:** (1) `version.dll`; (2) `dinput.dll` / `dinput8.dll` if
-AoE2 imports them and `version.dll` turns out not to load under Box86/Wine;
+**Fallbacks, ranked** (revised by section 2e — there is no DirectInput import,
+so that option is gone): (1) `version.dll`; (2) a `winmm`-style redirection,
+which this install already proves works for this game, or `MSVFW32.dll`;
 (3) the `ddraw.dll` proxy with a complete, generated export table and the real
 module resolved by something other than name. Prove the vector on device at
 Checkpoint 2 before building anything on it — `TOOLS.md` warns that hooking
@@ -187,10 +304,11 @@ that: clicks and scroll only. Being in-process is what saves us, and there are
 four routes. Ranked by expected reliability, not by simplicity:
 
 1. **Hook the game's own mouse read.** We are already inside the process. Hook
-   `GetCursorPos` (and the DirectInput mouse path, if the binary uses one) and
-   return the position *we* computed from the controller ray. This bypasses
-   the OS, Wine and the window manager entirely, which is exactly why it is
-   ranked first — nothing else in the stack gets a vote.
+   `GetCursorPos` and return the position *we* computed from the controller
+   ray. This bypasses the OS, Wine and the window manager entirely, which is
+   exactly why it is ranked first — nothing else in the stack gets a vote.
+   **Section 2c confirms this is the route**: the game reads the mouse through
+   plain Win32 `GetCursorPos` and imports no DirectInput at all **[measured]**.
 2. **`SetCursorPos` in-container.** Simplest, one line.
    `WINLATORXR_DESC.md` flags Wine-side mouse motion as unverified and
    *"worth testing early — it is the cheapest thing that would unlock
@@ -224,6 +342,10 @@ transform you can write, a 2D blit for the sync pixel, a window you can resize
 blitter: no projection matrix, no view transform, no depth buffer, no camera
 to write. There is no existing code path that can draw a tilted quad, let
 alone a billboard.
+
+Stage A puts this beyond argument: the executable imports **one** DirectDraw
+function and **no Direct3D whatsoever**, and the strings `D3D` and `Direct3D`
+do not occur in it **[measured]**. There is no 3D renderer here to keep.
 
 So the deviation is not "modernise the renderer". It is **"add the only 3D
 renderer this project will have"**, and the rule's cost-benefit does not apply

@@ -51,7 +51,14 @@ and they are in fact right, which is worth writing down once:
 
 Counting from the three `IUnknown` slots at 0–2, in declaration order. **[static]**
 
-**Not a bug — but it does not rescue item 4**, which is about which
+**And they generalise**, which matters now that Stage A has ruled the 7
+interfaces out: `Blt` = 5, `BltFast` = 7 and `Flip` = 11 hold on *every*
+`IDirectDrawSurface*`, and `CreateSurface` = 6 on every `IDirectDraw*`, because
+later interface versions **append** methods rather than reordering them. The
+one real difference is the struct: `DDSURFACEDESC` for versions 1–3,
+`DDSURFACEDESC2` for 4 and 7.
+
+**Not a bug — and it does not rescue item 4**, which is about which
 *interface* the game asks for, not which slot a method occupies.
 
 ### 3. Pixel format is assumed to be 32bpp, so a palettized surface renders as garbage
@@ -67,8 +74,12 @@ bits per pixel, in which case this reads up to four times the real row width —
 garbage output, and a read past the end of the surface on the last row. The
 MetaAI notes acknowledge the palette gap but the code does not guard it.
 
-**AoE2 at this patch level plausibly runs 8-bit palettized**, which makes this
-the default path, not an edge case.
+**Confirmed by Stage A: 8-bit palettized is the main path.** The exe imports
+the full GDI palette API — `CreatePalette`, `SelectPalette`, `RealizePalette`,
+`ResizePalette`, `GetPaletteEntries`, `SetPaletteEntries`,
+`GetSystemPaletteEntries`, `GetNearestPaletteIndex` **[measured]** — which a
+game only needs in a palettized display mode. This is the first frame, not an
+edge case.
 
 **Fix at Stage 6:** read `ddpfPixelFormat` and branch. For a palettized
 surface, read the DirectDraw palette, build a 256-entry lookup table, rebuild
@@ -83,8 +94,26 @@ blindly either — pitch is not width.
 which case `Hooked_CreateSurface` never fires and nothing downstream of it
 ever runs.
 
-**Status:** this is the question Stage A answers out of the binary's imports
-and GUIDs. Do not write hooking code before it is answered.
+**Status: confirmed fatal, and worse than it looks. [measured]** Stage A
+searched both executables for every DirectDraw interface GUID.
+`IID_IDirectDraw7` and `IID_IDirectDrawSurface7` are **absent**; `IDirectDraw`,
+`2`, `4` and `IDirectDrawSurface`, `2`, `3`, `4` are all present. A binary
+cannot `QueryInterface` for a GUID it does not carry, so the game provably
+never touches the 7 interfaces.
+
+The subtlety: the skeleton's own `QueryInterface(IID_IDirectDraw7)` would have
+**succeeded**, because real `ddraw.dll` implements DD7 regardless of what the
+game wants. But each interface version has its own vtable, so patching DD7's
+`CreateSurface` slot intercepts nothing the game does through DD1/2/4. The
+skeleton would have logged "Hooked DD7 CreateSurface" and then never fired
+again — a success message followed by silence, which is the most expensive
+kind of failure to diagnose on a device with no debugger.
+
+**Fix:** target DD1/2/4 and Surface1/2/3/4, and **wrap rather than
+vtable-patch** — return our own object from `DirectDrawCreate` and wrap
+`QueryInterface`, so every interface the game asks for is observed and wrapped
+as it is handed over. The version in use then becomes a log line on the first
+run instead of a question.
 
 ### 5. `hooks.cpp` uses `std::vector` without including `<vector>`
 
@@ -181,8 +210,11 @@ Missing: `AcquireDDThreadLock`, `ReleaseDDThreadLock`, `SetAppCompatData`,
 fails to load. The fixed ordinals (`@1`–`@10`) are also arbitrary and do not
 match the real module's.
 
-**Status:** moot once item 1's fix lands, since `version.dll` has a handful of
-exports and nothing depends on our forwarding being complete.
+**Status:** moot once item 1's fix lands. AoE2 imports exactly three functions
+from `VERSION.dll` — `GetFileVersionInfoA`, `GetFileVersionInfoSizeA`,
+`VerQueryValueA` **[measured]** — so the replacement proxy forwards three
+thunks. Note they *are* genuinely called, so forward them properly rather than
+stubbing them.
 
 ---
 
@@ -201,11 +233,17 @@ none were needed.
 
 ### 15. The target patch level and executable are wrong
 
-Those docs target *"1.0c and HD"* and `empires2.exe`. This project is AoK
-v2.0a + Conquerors v1.0c + **UserPatch 1.5**, which runs from the expansion
-executable. Treat every inherited address, offset and exe name as suspect —
-UserPatch 1.5 is a different binary, so published stock-1.0c offsets will not
-match.
+Those docs target `empires2.exe`, which is the **base-game** binary. The game
+runs from `age2_x1/age2_x1.exe` — version resource `AGE2_X1.EXE`,
+"Age of Empires II Expansion", FileVersion `00.07.26.0809`, Microsoft Corp.
+2001 **[measured]**.
+
+Treat every inherited address, offset and exe name as suspect for two
+independent reasons: the inspected exe is a **no-CD repack** carrying four
+appended sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch`) that a
+pristine 1.0c does not have, and the **UserPatch question is still open**
+(`PROJECT_OVERVIEW.md` section 2a) — if UserPatch is installed later, it runs
+from a *different executable* again and the offsets move a third time.
 
 ### 16. One entry in the MetaAI list is not a bug fix at all
 

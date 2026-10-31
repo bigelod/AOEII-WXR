@@ -22,7 +22,7 @@ The live tick-list. Status detail lives in [CURRENT_STATUS.md](CURRENT_STATUS.md
 
 - [x] **0** Feasibility assessed, intake complete
 - [x] **1** Unmodified game runs in a container — *runs cleanly* **[owner]**
-- [ ] **A** Binary reconnaissance: bitness, exe, DirectDraw interface version
+- [x] **A** Binary reconnaissance — **done**, see `PROJECT_OVERVIEW.md` 2a–2e
 - [ ] **2** Our code loads and writes a log with a build stamp
 - [ ] **S1** **Spike: can we move the mouse from inside the container?**
 - [ ] **3** Window is borderless and fills the display
@@ -43,10 +43,22 @@ until the owner says head tracking feels locked.
 
 ---
 
-## Stage A — Binary reconnaissance
+## Stage A — Binary reconnaissance ✅ done
 
-**Local, on the desktop, no device, no code.** The owner is copying the game
-files to this machine, which turns three assumptions into measurements.
+**Findings are in `PROJECT_OVERVIEW.md` sections 2a–2e** and are summarised in
+`CURRENT_STATUS.md`. The headlines: 32-bit confirmed; DirectDraw only, no
+Direct3D; **the DD7 interfaces are absent from the binary**, so the inherited
+hooks could never have fired; the mouse is read through plain
+`GetCursorPos` with no DirectInput, which largely de-risks the laser pointer;
+the palette API is fully imported, so 8-bit is the main path; and **UserPatch
+1.5 is not actually installed** on the inspected copy — an open decision for
+the owner.
+
+The original stage brief is kept below, because the same questions must be
+re-asked if the target binary changes (which the UserPatch decision may do).
+
+**Local, on the desktop, no device, no code.** Turns three assumptions into
+measurements.
 
 1. **Confirm 32-bit** and identify the real executable.
    `dumpbin /headers age2_x1.exe` — and establish whether UserPatch 1.5
@@ -67,9 +79,22 @@ files to this machine, which turns three assumptions into measurements.
 **Deliverable:** the `[unverified]` rows of `PROJECT_OVERVIEW.md` section 2
 replaced with `[measured]` ones.
 
-> ### CHECKPOINT A — with the owner
-> The game files on a readable path on this machine. Nothing else is needed;
-> I will report what the binary says rather than asking.
+> ### CHECKPOINT A — with the owner ✅ files supplied, measurements taken
+> **One decision came back out of it:** UserPatch 1.5 is not installed on the
+> inspected copy, though the project was specified with it. Target stock 1.0c,
+> or install UserPatch and re-run this stage against its executable? It
+> changes every offset, the available resolutions and multiplayer behaviour.
+> Until it is answered, the plan assumes stock 1.0c.
+
+### Stage A findings that change later stages
+
+| Stage | What changed |
+|---|---|
+| 2 | the injection vector is confirmed available (`VERSION.dll` imported), but must forward three real functions |
+| **S1** | **expected to succeed on route 1.** The game reads the mouse via Win32 `GetCursorPos`, no DirectInput. It also calls `SetCursorPos` and `ClipCursor` itself, so expect contention |
+| 6 | the 8-bit palette path is the **main** path, not a fallback. Budget for the lookup table from the start |
+| 6 / S3 | hooks must target **DD1/2/4 and Surface1/2/3/4** — never the 7 interfaces. Prefer wrapping `QueryInterface` over patching vtables, so the version in use becomes a log line |
+| 9 | keyboard is read via `GetKeyState` / `GetAsyncKeyState`, so map scrolling can be fed by hooking those rather than synthesising events |
 
 ---
 
@@ -105,26 +130,35 @@ replaced with `[measured]` ones.
 pointer — and therefore the whole design — is possible.** It needs nothing but
 in-process code and a device.
 
-InputAPI cannot move the mouse. So, in order, each tried for half an hour:
+InputAPI cannot move the mouse. **Stage A reordered this spike**: the game
+reads the mouse through plain Win32 `GetCursorPos` and imports no DirectInput
+at all **[measured]**, so what was route 3 is now route 1 and the spike is
+expected to confirm rather than discover.
 
-1. `SetCursorPos` to a known point. Does the AoE2 cursor move?
-2. `mouse_event` / `SendInput` absolute. Same question.
-3. Hook `GetCursorPos` and return a fixed point. Does the game's cursor follow
-   *our* number? This is the route that bypasses the OS entirely, and if 1 and
-   2 fail it is the one that matters.
-4. If the game reads the mouse through DirectInput instead, hook that path.
+1. **Hook `GetCursorPos`** and return a fixed point. Does the game's cursor
+   follow *our* number? An IAT hook on a documented function, with nothing in
+   Wine or X11 getting a vote. Expected to work.
+2. `SetCursorPos` to a known point. Does the AoE2 cursor move? Still worth
+   knowing, because it is one line and because the answer generalises to
+   other ports.
+3. `mouse_event` / `SendInput` absolute. Same question.
+4. **Also establish the contention**: the game calls `SetCursorPos` and
+   `ClipCursor` itself **[measured]**. Find out whether it fights us, and
+   whether `ClipCursor` needs neutralising so the pointer can reach the
+   screen edges.
 
 **Deliverable:** one of the four marked as working, written into
 `PROJECT_OVERVIEW.md` section 4 as `[measured]`.
 
-**If all four fail** the laser pointer is dead and the project changes shape:
+**If all of them fail** — now unlikely — the laser pointer is dead and the
+project changes shape:
 the tabletop still works as a *view*, with input left to the runtime's own
 gyro-mouse (`MODE_3D = -1`). Worse, but not nothing — and much better found
 out now than at Stage 7.
 
 > ### CHECKPOINT S1 — on the device
-> Which of the four moved the cursor. A photo of the cursor in the corner it
-> was sent to is sufficient evidence.
+> Which routes moved the cursor, and whether the game fought back. A photo of
+> the cursor in the corner it was sent to is sufficient evidence.
 
 ---
 
@@ -457,14 +491,15 @@ One change per deploy.
 
 | Risk | Likelihood | What we do about it |
 |---|---|---|
-| **The game uses a DirectDraw interface we do not hook** | high | Stage A reads the imports and GUIDs out of the binary before any hooking code is written |
+| ~~The game uses a DirectDraw interface we do not hook~~ | **confirmed and closed** | Stage A: the DD7 GUIDs are absent, so the inherited hooks could never fire. Target DD1/2/4 + Surface1/2/3/4, and wrap `QueryInterface` rather than guessing |
+| ~~Mouse motion is impossible from inside the container~~ | **largely closed** | Stage A: plain Win32 `GetCursorPos`, no DirectInput. S1 still runs, but to confirm rather than to discover |
+| **The target binary changes** (UserPatch decision) | open | nothing is built against a specific offset yet. Settle it before Stage 11, which is the first stage that needs addresses |
 | **Our pixels never reach the window** (two presenters) | medium–high | Spike S3, with three ranked answers, before Stage 6 depends on it |
-| **Mouse motion is impossible from inside the container** | medium | Spike S1, four ranked routes, scheduled immediately after Stage 2. If all fail, the design falls back to the runtime's own gyro mouse |
 | **Per-sprite interception does not exist** | **high — expected** | Spike S2 gates Stage 11; Routes A and B exist precisely for this outcome; Stages 6–10 do not depend on it at all |
-| **Palettized surface mishandled** | high if unaddressed | treat the pixel format as a measurement (Stage A, Stage 6 step 1), not an assumption; `BUG_FIXES.md` item 3 |
+| **Palettized surface mishandled** | **high — 8-bit is the measured main path** | the full GDI palette API is imported, so build the 256-entry lookup table from the start rather than discovering it on a black screen; `BUG_FIXES.md` item 3 |
 | **Injection vector does not load under Box86/Wine** | medium | Checkpoint 2 proves the vector before anything is built on it; two ranked fallbacks |
 | **The engine fights the borderless window** | medium | expect it (`TIPS.md`); prefer the container size doing the work over a per-frame fight |
-| **UserPatch 1.5 offsets differ from published 1.0c ones** | **certain** | treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
+| **Published offsets do not match this binary** | **certain** | the inspected exe is a no-CD repack with four appended sections, and the UserPatch question is still open. Treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
 | **The table is unreadable at playable resolutions** | medium | judged at Checkpoint 6, early, where the answer can still change the design |
 | **Tuned values do not transfer from tester to device** | medium | usually a frame-of-reference problem, not precision. If a value only works where it was found, fix the frame |
 | **A saved config overrides a shipped default** | certain, eventually | say so explicitly when handing over every build |
