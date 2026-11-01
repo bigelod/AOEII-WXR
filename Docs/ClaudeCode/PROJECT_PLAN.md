@@ -28,7 +28,7 @@ The live tick-list. Status detail lives in [CURRENT_STATUS.md](CURRENT_STATUS.md
 - [ ] **3** Window is borderless and fills the display
 - [ ] **4** XrApi 0.5 client parses real device packets; button table built from a device log
 - [ ] **5** Sync pixel drawn, last, 10x10
-- [ ] **S3** **Spike: can we present our own frame at all?**
+- [ ] **S3** **Spike: confirm the cnc-ddraw D3D9 device and the `Present` hook**
 - [ ] **6** **The tabletop: 2D frame on a quad, mono, head tracking feels locked** (the big one)
 - [ ] **7** Laser pointer selects and commands units
 - [ ] **8** HUD lifted off the table onto floating quads
@@ -51,18 +51,17 @@ Direct3D; **the DD7 interfaces are absent from the binary**, so the inherited
 hooks could never have fired; the mouse is read through plain
 `GetCursorPos` with no DirectInput, which largely de-risks the laser pointer;
 the palette API is fully imported, so 8-bit is the main path; and **UserPatch
-1.5 is not actually installed** on the inspected copy — an open decision for
-the owner.
+1.5 was not installed** on the inspected copy — a requirement since dropped,
+so the target is the supplied stock 1.0c build **[owner]**.
 
 The original stage brief is kept below, because the same questions must be
-re-asked if the target binary changes (which the UserPatch decision may do).
+re-asked if the target binary ever changes.
 
 **Local, on the desktop, no device, no code.** Turns three assumptions into
 measurements.
 
 1. **Confirm 32-bit** and identify the real executable.
-   `dumpbin /headers age2_x1.exe` — and establish whether UserPatch 1.5
-   installs alongside or replaces it. Stop calling it `empires2.exe`; that is
+   `dumpbin /headers age2_x1.exe`. Stop calling it `empires2.exe`; that is
    the base-game binary and this project runs the expansion.
 2. **Which DirectDraw interface does it actually use?** `dumpbin /imports`
    for the `ddraw.dll` imports, then `strings` / a disassembler for the
@@ -71,20 +70,22 @@ measurements.
    `IDirectDrawSurface3`, and the MetaAI skeleton hooks **only** the `7`
    interfaces **[code]**. If the game never asks for `7`, that code can never
    fire — and that single fact is worth more than the rest of this stage.
-3. **Does it import `version.dll`?** Decides whether the preferred injection
-   vector is available, and whether `dinput.dll` is the fallback.
+3. **Does it import `version.dll`?** Was the preferred injection vector; now a
+   fallback, since the mod ships as `d3d9.dll` (`PROJECT_OVERVIEW.md` section
+   4). Still worth knowing.
 4. **What does the window look like?** Does it go true-fullscreen or
-   borderless-windowed, and at what resolutions will UserPatch 1.5 run?
+   borderless-windowed, and which display modes will stock 1.0c accept? The
+   second question sets the table's texture resolution — but not ours, see
+   `PROJECT_OVERVIEW.md` section 6.
 
 **Deliverable:** the `[unverified]` rows of `PROJECT_OVERVIEW.md` section 2
 replaced with `[measured]` ones.
 
-> ### CHECKPOINT A — with the owner ✅ files supplied, measurements taken
-> **One decision came back out of it:** UserPatch 1.5 is not installed on the
-> inspected copy, though the project was specified with it. Target stock 1.0c,
-> or install UserPatch and re-run this stage against its executable? It
-> changes every offset, the available resolutions and multiplayer behaviour.
-> Until it is answered, the plan assumes stock 1.0c.
+> ### CHECKPOINT A — with the owner ✅ complete
+> Files supplied, measurements taken, and the one decision it raised is
+> **settled: UserPatch is out of scope** **[owner]** — not needed, and the
+> supplied stock 1.0c build already runs in WinlatorXR. The target is
+> `age2_x1/age2_x1.exe` as supplied. No stage is waiting on anything.
 
 ### Stage A findings that change later stages
 
@@ -95,6 +96,7 @@ replaced with `[measured]` ones.
 | 6 | the 8-bit palette path is the **main** path, not a fallback. Budget for the lookup table from the start |
 | 6 / S3 | hooks must target **DD1/2/4 and Surface1/2/3/4** — never the 7 interfaces. Prefer wrapping `QueryInterface` over patching vtables, so the version in use becomes a log line |
 | 9 | keyboard is read via `GetKeyState` / `GetAsyncKeyState`, so map scrolling can be fed by hooking those rather than synthesising events |
+| 10 | **two resolutions, not one** — the container sets our render resolution, the game's own stock mode sets the table texture. See `PROJECT_OVERVIEW.md` section 6; dropping UserPatch costs less than it appears to |
 
 ---
 
@@ -103,8 +105,9 @@ replaced with `[measured]` ones.
 **The whole deliverable is a log file.** One file, one line, with
 `__DATE__ __TIME__` compiled in and printed first.
 
-1. `version.dll` (per Stage A) forwarding its handful of exports, with a
-   thread of our own.
+1. **`d3d9.dll`** (per `PROJECT_OVERVIEW.md` section 4) forwarding to DXVK's
+   own `d3d9.dll`, shipped alongside under its own name, with a thread of our
+   own. `version.dll` drops to the fallback list.
 2. Logger: fixed path with a desktop fallback, mutex-correct, build stamp on
    line 1 — see `BUG_FIXES.md` items 6–8 for the three defects in the
    inherited logger, all of which are cheaper to not reintroduce than to fix.
@@ -116,11 +119,12 @@ replaced with `[measured]` ones.
    permanently, from the start.
 
 > ### CHECKPOINT 2 — with the owner, on the device
-> Does the log appear, and does line 1 show the stamp just built? This is also
-> where we learn whether our injection vector works **under Box86 and Wine**,
-> which is not a given and is far cheaper to find out now than after a feature
-> depends on it. If `version.dll` does not load, fall back per
-> `PROJECT_OVERVIEW.md` section 4 before going further.
+> Does the log appear, does line 1 show the stamp just built, and does line 2
+> name the cnc-ddraw renderer in use? This is also where we learn whether our
+> injection vector works **under Box86 and Wine**, which is not a given and is
+> far cheaper to find out now than after a feature depends on it. If
+> `d3d9.dll` does not load, fall back per `PROJECT_OVERVIEW.md` section 4c
+> before going further.
 
 ---
 
@@ -230,31 +234,43 @@ answer a question that otherwise needs a log pulled off the headset.
 
 ---
 
-## Spike S3 — Can we present our own frame at all?
+## Spike S3 — Confirm the cnc-ddraw D3D9 device
 
-**The experiment behind Stage 6**, and the one architectural unknown that no
-amount of reading settles. Two presenters want the same window.
+**Replaced 2026-11-01.** This spike used to ask whether our own rendered frame
+could reach the window at all while the game presented through DirectDraw —
+"two presenters on one window", which this plan called its largest live
+unknown. **The revised architecture removes that question entirely**
+(`PROJECT_OVERVIEW.md` section 4): cnc-ddraw owns DirectDraw, we hook D3D9
+`Present`, and there is only ever one device.
 
-Three candidate answers, tried in order:
+What remains is smaller, and is a confirmation rather than a discovery. The
+owner reports cnc-ddraw's D3D9 renderer works inside a container **[owner]**;
+this spike proves it for *this* game on *this* device, and establishes the
+hook.
 
-1. **Suppress the game's `Flip`, present our own D3D9 frame.** What the MetaAI
-   skeleton does **[code]**. Cleanest if it works.
-2. **Let the game present, composite into its surface.** We lock the primary,
-   draw our 3D scene into it ourselves, let `Flip` proceed. No second
-   presenter, but it means software rasterisation of the tabletop — viable for
-   a quad, a dead end for billboards.
-3. **Our own window.** Create a borderless window on top, present to that, let
-   the game's window sit behind it. The runtime captures whatever is in front.
+1. Configure WinlatorXR's cnc-ddraw with **`renderer=direct3d9`**, not `gdi`.
+2. Drop in a `d3d9.dll` of ours that forwards to DXVK's (shipped alongside
+   under its own name — `PROJECT_OVERVIEW.md` 4b on why that escapes the
+   recursion trap) and logs the device creation parameters.
+3. **Log the renderer actually in use on line 2 of our log**, and fail loudly
+   if there is no D3D9 device. A missing device is the one way this
+   architecture collapses, and it must never present as a mystery.
+4. Hook `Present`. Copy the backbuffer to a texture, clear, draw one
+   solid-colour triangle, present.
 
-**Deliverable:** one of the three working on device, with a solid-colour
-triangle visible in the headset. A triangle, not a tabletop — the question is
-only whether our pixels arrive.
+**Deliverable:** a coloured triangle over the game, in the headset, and a log
+line naming the renderer. A triangle, not a tabletop — the question is only
+whether we are inside the right device.
 
-Budget for this failing in an interesting way. It is also the stage where
-DXVK's D3D9 path inside the container gets its first real test.
+**If there is no D3D9 device**, fall back to writing the DirectDraw layer
+ourselves. That route is specified in `PROJECT_OVERVIEW.md` section 4c and the
+Stage A measurements were taken for it, so it is a real fallback rather than a
+theoretical one — at the cost of the palette work, the DirectDraw
+interception and the original two-presenters problem.
 
 > ### CHECKPOINT S3 — on the device
-> Is there a coloured triangle over the game? A photo answers it.
+> Is there a coloured triangle over the game, and what renderer does line 2 of
+> the log name? A photo and the log answer it.
 
 ---
 
@@ -263,12 +279,11 @@ DXVK's D3D9 path inside the container gets its first real test.
 **Mono only.** `MODE_VR = 1`, `MODE_3D = 0`. No stereo, no pointer, no HUD
 work. Just the game's frame on a surface in a room, and a head that moves.
 
-1. **The frame as a texture.** Capture the game's finished 2D output and
-   upload it. **Handle the pixel format properly** — the inherited code
-   assumes 32bpp and will produce garbage or read out of bounds at 8 or 16
-   (`BUG_FIXES.md` item 3). If the surface is palettized, read the DirectDraw
-   palette, build a 256-entry lookup table, rebuild it when the palette
-   changes, and convert on upload.
+1. **The frame as a texture.** At `Present`, copy the backbuffer into an
+   offscreen texture (`StretchRect`). **No palette work is needed** on this
+   path — cnc-ddraw has already converted the game's 8-bit surface to a D3D9
+   texture (`PROJECT_OVERVIEW.md` 4b). On the fallback path the obligation
+   returns in full: `BUG_FIXES.md` item 3 and section 2d.
 2. **The table.** One quad, tilted, at a chosen height and size in metres.
    Put the scale in **one constant** — `XRAPI_V0_4_DESC.md` section 6 on why a
    magic multiplier scattered through the code cannot be changed later.
@@ -304,25 +319,139 @@ both were tuned at once.
 
 Only now, and only along the route S1 proved.
 
-1. **Ray from the dominant controller**, intersected with the table quad.
-   Convert the hit point to table UV, then to game screen pixels. Measure this
-   in the **table's** frame, not the hand's — `TIPS.md` on why a value
-   expressed in a rotating frame can never converge.
-2. **Feed the position** by the S1 route. Clamp to the game's screen rect.
-3. **Trigger is click.** Decide held versus edge-triggered deliberately — a VR
-   trigger is a *held state*, and a game waiting for a down-edge waits forever.
-   Drag-select needs press, move, release to all survive the route.
-4. **Draw the ray and a dot on the table.** Visible feedback is most of what
-   makes pointing feel accurate.
-5. **Thumbstick scrolls the map** via arrow keys.
+**The design [owner]: either controller can point.** A ray from whichever hand
+the player raises, intersected with the table, converted to game screen
+coordinates, with the trigger driving the in-game mouse. That is better than
+the single-dominant-hand pointer this plan previously specified — on a table
+you point with whichever hand is free, and nothing about the genre says the
+cursor belongs to one hand.
 
-**Handedness: swap once, at ingest**, then never test the flag again for
-anything spatial.
+**But there is exactly one OS cursor and two possible rays**, so the design
+needs an explicit arbitration rule. Without one, this produces bugs that look
+like tracking faults and get debugged as tracking faults.
+
+### The mapping
+
+1. **Ray from either controller**, intersected with the table quad. Convert the
+   hit point to table UV, then to game screen pixels. Measure this in the
+   **table's** frame, not the hand's — `TIPS.md` on why a value expressed in a
+   rotating frame can never converge. Both hands use the same table-frame
+   maths, so there is one conversion, not two.
+2. **Feed the position** by the S1 route (hooking `GetCursorPos`, per section
+   2c). Clamp to the game's screen rect.
+3. **Freeze on the last valid point when the ray misses the table.** Never
+   snap to an edge or to zero — the same rule as a dropped pose, and for the
+   same reason: a cursor that jumps is worse than a cursor that waits.
+
+### The four arbitration rules
+
+**(a) One owner at a time, chosen by last intent.** The hand that most
+recently pressed a trigger, or most recently brought its ray onto the table,
+owns the cursor. Hysteresis, not a per-frame contest — a stable owner is worth
+more than an instantly responsive one.
+
+**(b) A trigger press locks ownership until release. This is the important
+one.** AoE2's core interactions are *drags*: box-select is press, move,
+release. If the off hand's ray wanders across the table mid-drag and steals
+the cursor, the selection box ends somewhere the player never pointed. So once
+a trigger is down, that hand owns the cursor unconditionally until it comes
+up, and the other hand is ignored for cursor purposes entirely.
+
+**(c) Set the position *before* reporting the button.** When a press also
+changes the owner, the order matters: resolve the owner, write the cursor
+position, *then* report the button state. Reversed, the game sees the click at
+the previous owner's position — a one-frame race that presents as "it
+sometimes clicks in the wrong place" and is miserable to find later.
+
+**(d) Trigger is a held state, not an event.** `FIRST_STEPS.md` Stage 9 and
+the Shogo respawn hang: a game waiting for a down-edge waits forever. Press,
+move and release must all survive the route, which is the real test of S1 —
+not a single click.
+
+### Buttons: trigger is primary, grip is secondary
+
+**[owner]** On **both** controllers:
+
+| Control | Game equivalent |
+|---|---|
+| **Trigger** | **primary / left click** |
+| **Grip** | **secondary / right click** |
+
+Bool indices from the packet, to be confirmed against a device log at
+Checkpoint 4 rather than trusted from a document: left grip `0`, left trigger
+`7`, right grip `12`, right trigger `18`.
+
+This allocation is clean, and it settles the button-budget worry this plan
+raised earlier: because each hand carries both clicks on trigger and grip,
+**A/B/X/Y and the menu buttons stay entirely free** for hotkeys, control
+groups and the radial menu at Stage 9. An either-handed pointer costs nothing
+it needed.
+
+**One thing it spends: grip is no longer available as a grab gesture.** This
+plan had floated reach-out-and-drag-the-table as a nicer way to pan than keys.
+With grip bound to right-click that gesture would have to be a modifier
+combination, and right-click matters far more in an RTS than a panning
+flourish does. The thumbsticks cover panning instead, below, so nothing is
+lost — but do not re-propose the grab gesture without noticing it is taken.
+
+### Thumbsticks: either stick scrolls the map
+
+**[owner]** Either controller's thumbstick drives the map, as **held arrow
+keys**. Both sticks do the same job; there is no left/right distinction.
+
+- **Deadzone, and expose it as a setting.** The sibling Interstellar Marines
+  port ships `deadzone=0.20`, which is a reasonable starting value.
+- **Quantise to the four arrow keys**, with diagonals as two keys held at once
+  — which is exactly how keyboard scrolling already works in the game, so the
+  engine needs no convincing.
+- **Larger magnitude wins** when both sticks are deflected. Summing them lets
+  two hands fight and cancel; taking the more deflected stick is predictable.
+- **Scroll speed is the game's, not ours.** Arrow keys are digital, so analog
+  stick magnitude cannot modulate speed without pulsing the key, which would
+  stutter. Accept the game's fixed scroll rate; if it is wrong, the fix is a
+  game setting, not a clever input trick.
+
+**This must be in-process `keybd_event`, not InputAPI.** InputAPI cannot hold a
+key down: `WINLATORXR_DESC.md` states that keys in one message are pressed
+*together* with **no separate down/up event**, and that each message carries a
+**50 ms hold between press and release**. A held arrow key would therefore have
+to be re-sent every 50 ms, giving stuttering scroll at best. In-process
+`keybd_event` with an explicit `KEYEVENTF_KEYUP` gives a genuinely held key.
+InputAPI stays the fallback for *discrete* keys only.
+
+**Stuck-key discipline, because a runaway map is the obvious failure here.**
+Release every held arrow key when the stick returns inside the deadzone, when a
+menu opens, when the window loses focus, and on shutdown. A key left down
+scrolls the map forever and looks like a tracking fault.
+
+### Feedback: the player must see which hand is live
+
+With two rays and one cursor, "which hand has control" is invisible unless we
+draw it. Draw **both** rays, dim; highlight the owning one; and show the cursor
+dot only for the owner. This is cheap and it is most of what makes the pointer
+feel trustworthy rather than erratic.
+
+### Consequences to carry
+
+- **The pointer is handedness-agnostic**, which is a simplification: it reads
+  both hands and never asks which is dominant. Keep the ingest swap
+  (`TIPS.md`) — it is harmless here — and let handedness decide only the
+  *non-pointer* bindings.
+- **Each hand needs a full click set.** Left-click and right-click both matter
+  enormously in AoE2 (select, and move/attack), so every hand that can point
+  needs both. That is a real cost against the controller's button budget and it
+  constrains Stage 9's mapping table. Settle it there, with the owner.
+- **The ray must test the HUD quads too**, once Stage 8 lifts them — nearest
+  hit wins, and each surface maps back to its own screen region.
 
 > ### CHECKPOINT 7 — on the device
 > Can the owner select a villager, order it to build, and queue units from the
-> command panel? Ask specifically whether pointing feels *accurate* or
-> *approximate* — the latter usually means the table's frame, not the ray.
+> command panel? Then specifically:
+> - does **box-select** survive a drag, including with the other hand moving?
+> - does swapping hands mid-session feel natural, and is it ever ambiguous
+>   which hand has the cursor?
+> - does pointing feel *accurate* or *approximate*? The latter usually means
+>   the table's frame, not the ray.
 
 ---
 
@@ -357,20 +486,130 @@ owner before implementing**. *VR action → game action (PC equivalent)*, one
 line each, with separate sections for distinct states (in game, menu, paused,
 scenario editor).
 
-AoE2 specifics that need a deliberate decision:
+**Decided already [owner]**, carried from Stage 7 — do not relitigate:
 
-- The control groups and hotkeys — an RTS lives on them, and a controller has
-  far fewer buttons than a keyboard. A radial menu drawn on our own layer is
-  probably the answer, and it is only possible because we have a renderer.
-- What happens in menus: `MODE_VR = 0`, the runtime's own mouse back, flat
-  presentation. Keep sending the outbound packet so the stream can be turned
-  back on, and expect a gap when returning to `1` **[runtime]**.
-- Shift-queue, Ctrl-group and Alt modifiers — all need a modifier scheme that
-  does not consume a controller button each.
+| VR action | Game action |
+|---|---|
+| Trigger, either hand | primary / left click |
+| Grip, either hand | secondary / right click |
+| Thumbstick, either hand | arrow keys, held (map scroll) |
+| Controller ray, either hand | mouse cursor position |
+
+Which leaves **A, B, X, Y and the menu buttons entirely unassigned** — the
+whole face-button budget, for the hard part below.
+
+### Four radial menus, on the four face buttons
+
+**[owner]** `X`, `Y`, `A` and `B` each **hold to open** a different radial
+menu. This is only possible because we own a renderer and can draw them, and it
+is the answer to the problem that an RTS lives on hotkeys while a controller
+has a handful of buttons.
+
+**They are already split across the hands.** On Touch controllers `X` and `Y`
+are on the left and `A` and `B` on the right, so this is two radials per hand
+rather than four on one. Packet bool indices to confirm at Checkpoint 4 rather
+than trust: `X` = 8, `Y` = 9, `A` = 10, `B` = 11.
+
+Four radials at eight sectors each is **32 actions**, which is more hotkey
+surface than the game needs — so the risk is not capacity but
+discoverability. Keep each menu's theme obvious, and label the ring with which
+button opened it.
+
+**A draft grouping, for the owner to correct — layout is their call:**
+
+| Menu | Theme | Sector examples |
+|---|---|---|
+| Control groups | recall and assign | groups 1–9 |
+| Unit commands | what the selection does | stop, delete, garrison, ungarrison, stand ground, formations |
+| Selection and navigation | finding things | select all military, next idle villager, town centre, cycle building type |
+| Game and system | out-of-game actions | pause, save, diplomacy, chat, tech tree, score |
+
+**Control groups want a two-level gesture**, because assigning and recalling
+are different actions on the same nine slots: a sector **tap** recalls the
+group, and a sector chosen **with the trigger held** assigns the current
+selection to it (the `Ctrl` in `Ctrl+1`). That covers both without a modifier
+button, and it is the main reason this menu deserves its own ring.
+
+#### The conflict: the sticks are already bound
+
+Radial selection naturally wants the thumbstick, and the thumbsticks scroll the
+map (Stage 7). Resolve it modally, and explicitly:
+
+- **Scoping is per controller, and that is confirmed** **[owner]**: while a
+  radial is open on a controller, **that controller's stick selects a sector
+  and stops scrolling**, and the *other* hand's stick keeps scrolling. So the
+  player can hold `X`, pick a sector with the left stick, and still nudge the
+  view with the right.
+- **Both radials open at once therefore stops scrolling entirely**, which
+  falls out of the per-controller rule rather than needing its own case. If
+  per-controller scoping turns out to feel confusing on device, binding *all*
+  stick input to the open radial is a one-line change — but start with the
+  more capable behaviour, since it costs nothing.
+- **Release every held arrow key the moment a radial opens.** Otherwise the map
+  keeps scrolling under the menu — this is the stuck-key failure from Stage 7
+  arriving by a different door, and it will look like a bug in the radial.
+- **Release the button to commit; deflect to nothing and release to cancel.**
+  A dead zone at the centre is the cancel, which needs no extra input.
+
+**An alternative worth trying on device:** draw the ring in space and pick
+sectors with the *laser pointer* instead of the stick. It avoids the modal
+switch entirely and is arguably more natural in VR — but it occupies the
+pointer, which is also the mouse. Stick-based is the simpler default; try both
+once something is running, because this is a question of feel and not of
+architecture.
+
+**Anchor the ring to the hand that opened it**, following that controller,
+rather than at a fixed point in space or at the centre of view. It is then
+always reachable, and it never occludes the middle of the table.
+
+### The left menu button is Escape
+
+**[owner]** The **left** controller's menu button maps to `ESC` — the game and
+options menu. Bool index `1`, to confirm at Checkpoint 4.
+
+Left specifically is the right call for a reason beyond preference: on Quest the
+**right** controller's system button is reserved by the runtime and does not
+reach an application, so the left one is the only menu button actually
+available.
+
+**Tie it to the presentation mode, with a caveat.** `MODE_VR = 0` on entering a
+menu is the right behaviour and what the Interstellar Marines port does: it
+stops a pose stream nothing is consuming, returns the runtime's own mouse so a
+flat menu is usable with no mapping work, and drops out of immersive
+presentation so the whole menu is readable at once. Keep sending the outbound
+packet so the stream can be restarted, and expect a gap on the way back to `1`
+— hold the last good pose across it rather than treating the silence as a
+dropout **[runtime]**.
+
+The caveat: **we cannot reliably tell whether AoE2's menu is actually open.**
+`ESC` also cancels things mid-game, so keying the mode switch to the button
+press alone would yank an unlucky player out of immersive mode. Until the game
+state can be read from memory — a Stage 11-era nicety, not a Stage 9 one —
+treat it as a **toggle on that button**, and say so in the controls table so it
+is a documented behaviour rather than a surprise.
+
+### Still to decide with the owner
+
+- **Shift-queue and the remaining modifiers.** `Shift` for queuing orders is
+  used constantly and has no button left. Candidates: a radial sector that
+  latches it for the next order, or holding both grips. Needs a decision, and
+  it should not cost a face button — all four are spent.
+- **What happens in the other states** — paused, scenario editor, and the
+  pre-game menus where `MODE_VR = 0` has already handed control back to the
+  runtime's mouse.
+- **The remaining sector contents**, once the four themes are agreed.
 
 > ### CHECKPOINT 9 — with the owner
 > Confirm the table before writing it, and again on the device after. Button
 > layout is pure preference and the owner is the authority.
+>
+> On the device, specifically:
+> - can a control group be **assigned and recalled** without looking away from
+>   the table?
+> - does the map **stop scrolling** the instant a radial opens?
+> - is it ever unclear which radial is open, or which hand owns it?
+> - does `ESC` behave predictably, given it is a toggle rather than a detected
+>   menu state?
 
 ---
 
@@ -403,12 +642,18 @@ excerpt that chose it.
 
 ## Stage 10 — Depth, comfort, settings
 
-1. **Measure AER against mono.** `MODE_3D = 2`, camera offset `±IPD/2` along
-   its local right vector flipping each frame, eye flag in the sync square's
-   **blue** channel (0 left, 255 right), red still the frame id. **Use the IPD
-   from the packet** (float 25), not 0.064. Make the modes mutually exclusive
-   in **one** function — HWXR had to order SBS before AER at three separate
-   sites to stop a runtime toggle setting both.
+1. **Measure AER once, for the tabletop-only configuration.** The port ships
+   **monocular** **[owner]** — see `PROJECT_OVERVIEW.md` section 3, where the
+   reason is that stereo turns billboards into visible cardboard cutouts, not
+   that it is expensive. But billboards do not exist yet at this stage, and
+   stereo represents a flat tilted table honestly, so this is the one window
+   in which AER is worth measuring: `MODE_3D = 2`, camera offset `±IPD/2`
+   along its local right vector flipping each frame, eye flag in the sync
+   square's **blue** channel (0 left, 255 right), red still the frame id, and
+   **the IPD from the packet** (float 25) rather than 0.064. Keep the
+   selection in **one** function — HWXR had to order SBS before AER at three
+   separate sites to stop a runtime toggle setting both. **Never build SBS**,
+   and switch to mono unconditionally once billboards are on.
 2. **Table placement as a setting**: height, size, tilt. These are the
    controls a tabletop port lives on and the comfortable values are personal.
    Prefer a good default and few knobs.
@@ -445,6 +690,45 @@ What is settled regardless of route:
 - **Depth sort by world position**, which is the reason Route A's true world
   coordinates matter.
 - **A unit stood up must be erased from the flat layer**, or it appears twice.
+- **The pointer picks billboards first, then the table** **[owner]**. The ray
+  tests the billboards as geometry and **stops at the nearest one it hits**;
+  with no billboard hit it falls through to the table quad as in Stage 7. The
+  pointer must therefore be written at Stage 7 so this can be slotted in
+  later — one surface list, nearest hit wins, rather than a hardcoded
+  table-plane intersection.
+- **Take the screen coordinate from the billboard's own source sprite, not by
+  projecting to the ground.** This removes the parallax problem outright. A
+  billboard exists *because* we found a sprite at a known rectangle in the 2D
+  frame, so that rectangle is already the answer — feed the game the
+  sprite's **anchor point** (its feet, where the unit actually stands), not
+  the rectangle's centre, which for a tall sprite sits well above the unit.
+  No ground-plane projection, no view-angle error, no unselectable castles.
+- **Hovered billboards get a glowing yellow outline** **[owner]**, so what is
+  interactable is obvious. Implementation notes:
+  - **Outline by alpha dilation in the billboard shader.** Sprites already
+    carry transparency, so sample the alpha at a ring of offsets: where our
+    own alpha is empty and a neighbour's is not, emit yellow. One branch in a
+    shader we are already running, for the one or two sprites under a ray.
+  - **Get the glow from the outline, not from post-processing.** A bloom pass
+    is exactly the "pure loss" `WINLATORXR_DESC.md` warns about — fill cost
+    that the compositor then resamples away. A soft multi-tap falloff, and
+    optionally a gentle pulse over time, reads as glow for almost nothing.
+  - **Only the cursor-owning hand highlights.** Two rays highlighting two
+    different units would contradict the single-owner rule that Stage 7 exists
+    to enforce, and there is only one cursor to act on either.
+  - **Suppress it during a drag.** While a trigger is held the cursor is
+    locked and the player is drawing a selection box; a highlight chasing the
+    ray mid-drag is noise.
+  - Pleasingly, **outlines are already this game's visual language** — AoE2
+    draws an outline for units standing behind buildings, so a highlight
+    outline will not look foreign.
+- **Our pick chooses the coordinate; the game still does the selecting.** We
+  hand it a screen position and its own hit-testing decides what that selects.
+  Where two sprites overlap in the 2D frame, our 3D pick and the game's choice
+  can disagree — aiming at a unit behind another may select the one in front.
+  Mapping to the anchor makes this rare. **Do not chase perfect agreement:**
+  it is unreachable while the game owns selection, and the highlight tells the
+  player what we think they are pointing at, which is the honest contract.
 - **Degrade to the flat tabletop** whenever a sprite cannot be classified.
   A table with some units standing and some flat is playable; a table with
   broken geometry is not.
@@ -493,13 +777,15 @@ One change per deploy.
 |---|---|---|
 | ~~The game uses a DirectDraw interface we do not hook~~ | **confirmed and closed** | Stage A: the DD7 GUIDs are absent, so the inherited hooks could never fire. Target DD1/2/4 + Surface1/2/3/4, and wrap `QueryInterface` rather than guessing |
 | ~~Mouse motion is impossible from inside the container~~ | **largely closed** | Stage A: plain Win32 `GetCursorPos`, no DirectInput. S1 still runs, but to confirm rather than to discover |
-| **The target binary changes** (UserPatch decision) | open | nothing is built against a specific offset yet. Settle it before Stage 11, which is the first stage that needs addresses |
-| **Our pixels never reach the window** (two presenters) | medium–high | Spike S3, with three ranked answers, before Stage 6 depends on it |
+| ~~The target binary changes (UserPatch decision)~~ | **closed** | UserPatch is out of scope **[owner]**; the target is the supplied stock 1.0c build. Offsets still need re-finding because it is a no-CD repack, but the binary is now fixed |
+| ~~Our pixels never reach the window (two presenters)~~ | **closed by design** | cnc-ddraw owns DirectDraw and we hook D3D9 `Present`, so there is one device and we are in it (`PROJECT_OVERVIEW.md` section 4) |
+| **cnc-ddraw has no D3D9 device in the container** | low — owner reports D3D9 works **[owner]** | Spike S3 confirms it for this game and device, and logs the renderer on line 2 so a failure is loud. Fallback is section 4c |
+| **cnc-ddraw version drift breaks our `Present` assumptions** | medium, over time | pin the version, state it in the README, and depend only on `Present` semantics rather than on its internals |
 | **Per-sprite interception does not exist** | **high — expected** | Spike S2 gates Stage 11; Routes A and B exist precisely for this outcome; Stages 6–10 do not depend on it at all |
-| **Palettized surface mishandled** | **high — 8-bit is the measured main path** | the full GDI palette API is imported, so build the 256-entry lookup table from the start rather than discovering it on a black screen; `BUG_FIXES.md` item 3 |
+| ~~Palettized surface mishandled~~ | **closed on the primary path** | cnc-ddraw converts the 8-bit surface for us. Returns in full on the fallback path, where it is the measured main path; `BUG_FIXES.md` item 3 |
 | **Injection vector does not load under Box86/Wine** | medium | Checkpoint 2 proves the vector before anything is built on it; two ranked fallbacks |
 | **The engine fights the borderless window** | medium | expect it (`TIPS.md`); prefer the container size doing the work over a per-frame fight |
-| **Published offsets do not match this binary** | **certain** | the inspected exe is a no-CD repack with four appended sections, and the UserPatch question is still open. Treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
+| **Published offsets do not match this binary** | **certain** | the supplied exe is a no-CD repack with four appended sections, so published stock-1.0c addresses were never going to match. Treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
 | **The table is unreadable at playable resolutions** | medium | judged at Checkpoint 6, early, where the answer can still change the design |
 | **Tuned values do not transfer from tester to device** | medium | usually a frame-of-reference problem, not precision. If a value only works where it was found, fix the frame |
 | **A saved config overrides a shipped default** | certain, eventually | say so explicitly when handing over every build |

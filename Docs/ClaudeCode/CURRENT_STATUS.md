@@ -20,8 +20,10 @@ the DD7 GUIDs at all, so it could never have intercepted a single call. In
 exchange, the project's scariest risk got much smaller — the game reads its
 mouse through plain Win32 `GetCursorPos` with no DirectInput, so the laser
 pointer that the whole input design rests on is a straightforward IAT hook.
-One new open question came out of the reconnaissance: **UserPatch 1.5 is not
-installed** on the copy supplied, though the project was specified with it.
+The reconnaissance also found that **UserPatch 1.5 was not installed** on the
+copy supplied, though the project was specified with it — and that
+requirement has since been **dropped** **[owner]**, so the target is now
+fixed and nothing is blocked.
 
 ---
 
@@ -83,31 +85,87 @@ documented Win32 means route 1 is an ordinary IAT hook with nothing in Wine,
 X11 or the window manager able to interfere. The spike now exists to confirm,
 not to discover.
 
-**What this did not de-risk:** Spike S3, whether our own rendered frame can
-reach the window at all while the game is presenting through DirectDraw. That
-is now the project's largest live unknown, and no amount of static analysis
-will settle it.
+**What this did not de-risk at the time:** Spike S3, whether our own rendered
+frame could reach the window while the game presented through DirectDraw.
+**That question has since been removed rather than answered** — see the
+architecture change below.
 
 ---
 
-## Open decision: UserPatch 1.5
+## Architecture revised: cnc-ddraw owns DirectDraw, we hook D3D9
 
-The project was specified as *v2.0a + Expansion 1.0c + UserPatch 1.5*
-**[owner]**. The supplied copy has **no UserPatch on it** — no
-`age2_x1.5.exe`, no `Script.Ai/` or `Script.Rm/`, no `.per` files, and the
-string `UserPatch` does not appear in the binary. What is there is a no-CD
-patched Conquerors 1.0c, plus two local DLL overrides already in use
-(`winmx.dll`, an OGG-WinMM build playing the soundtrack from files, and a
-replacement `dsound.dll`).
+**2026-11-01 [owner].** WinlatorXR can drop cnc-ddraw in at the top level, so
+the stack is now:
 
-It matters in three places: UserPatch runs from a **different executable**, so
-every memory offset differs; it is what supplies custom and widescreen
-resolutions, which is the container-resolution story in
-`PROJECT_OVERVIEW.md` section 6; and it changes multiplayer behaviour.
+```
+age2_x1.exe  ->  cnc-ddraw  ->  OUR d3d9.dll  ->  DXVK d3d9  ->  Vulkan
+```
 
-**Until it is settled the plan assumes stock 1.0c.** Nothing before Stage 11
-depends on a specific offset, so this does not block the next three actions —
-but it should be answered before then.
+We hook D3D9 **`Present`**: the backbuffer holds the finished 2D frame, so we
+copy it to a texture, clear, draw the tabletop and HUD and sync pixel, then
+present. Nothing depends on cnc-ddraw's internals, only on `Present`
+semantics. Full reasoning in `PROJECT_OVERVIEW.md` section 4.
+
+**Four named risks are gone, not reduced:**
+
+| Risk | Status |
+|---|---|
+| 8-bit palette conversion — the *measured* main path | cnc-ddraw converts for us |
+| Two presenters on one window — was the largest live unknown | one device, and we are in it |
+| DirectDraw interception, DD1-vs-DD4, `QueryInterface` wrapping | we never see DirectDraw |
+| Per-game DirectDraw quirks across four titles | inherited as fixed |
+
+**The cost:** a hard dependency on cnc-ddraw, accepted and documented as a
+pinned prerequisite **[owner]**, like the Interstellar Marines port requires
+BepInEx. Plus a full-frame GPU copy per frame and a depth buffer of our own.
+The previous DirectDraw design survives as a **specified fallback**
+(`PROJECT_OVERVIEW.md` 4c) — the Stage A measurements were taken for it and
+remain valid.
+
+The injection vector changes with it: **`d3d9.dll`**, not `version.dll`. That
+is a module we genuinely are rather than impersonate, and DXVK's own
+`d3d9.dll` is a renameable PE file, so `BUG_FIXES.md` item 1's self-recursion
+trap has an escape hatch that the `ddraw` route did not.
+
+---
+
+## Settled: monocular VR
+
+**2026-11-01 [owner].** The port is **monocular** — `MODE_VR = 1`,
+`MODE_3D = 0`. Still full 6DOF head tracking, still immersive, still the sync
+pixel; just one view instead of two.
+
+**The reason is the art style, not the frame budget.** Billboards are flat
+pre-rendered images of 3D objects. In stereo, the eye disparity says *"flat
+card at distance X"* while the picture says *"knight"*, and the brain
+believes the disparity — every unit reads as a cardboard cutout. In mono
+there is no disparity cue to contradict the flatness, so the illusion holds.
+This is why Paper Mario works. `PROJECT_OVERVIEW.md` section 3.
+
+One nuance kept open: stereo represents a flat tilted *table* honestly, and
+the tabletop ships before billboards exist. So AER gets measured once at
+Stage 10 for that configuration only. **SBS is never built.**
+
+---
+
+## Settled: UserPatch is out of scope
+
+**[owner]** The UserPatch requirement has been dropped — it is not needed, and
+the supplied build already runs in WinlatorXR. **The target is the supplied
+stock Conquerors 1.0c**, `age2_x1/age2_x1.exe`.
+
+The one consequence to carry: without UserPatch there are no custom or
+widescreen resolutions, so the game runs in its stock modes. That costs less
+than it appears to, because owning a 3D presentation layer **decouples our
+render resolution from the game's** — the container sets the first, the game's
+own mode only sets the table's texture sharpness. `PROJECT_OVERVIEW.md`
+section 6.
+
+Offsets still need re-finding for Stage 11, but for a different reason: the
+supplied exe is a no-CD repack with four appended sections, so published
+stock-1.0c addresses were never going to match anyway.
+
+**No stage is blocked.** This was the last open question.
 
 ---
 
@@ -171,20 +229,25 @@ skeleton predates knowing they were needed.
 
 ---
 
-## Next three actions
+## Next two actions
 
-1. **Owner:** decide the UserPatch question — target stock 1.0c, or install
-   UserPatch 1.5 and let me re-run Stage A against its executable.
-2. **Me:** Stage 2 — the source tree, `version.dll` injection forwarding its
-   three real functions, the logger with a build stamp on line 1, and the
+Nothing is waiting on the owner.
+
+1. **Me:** Stage 2 — the source tree, the **`d3d9.dll`** proxy forwarding to
+   DXVK's own (shipped alongside under its own name), the logger with a build
+   stamp on line 1 and **the cnc-ddraw renderer in use on line 2**, and the
    build-and-deploy script **with its freshness guard**, before there is
-   anything complicated to debug. Plus the DirectDraw wrapper logging which
-   interface version the game actually asks for, which is one line of output
-   and closes the last of the Stage A questions.
-3. **Me:** Spike S1 alongside it — hook `GetCursorPos`, return a fixed point,
-   see whether the cursor obeys and whether the game fights back.
+   anything complicated to debug.
+2. **Me:** Spikes S3 and S1 alongside it — confirm a cnc-ddraw D3D9 device
+   exists and get a triangle on screen through its `Present`; and hook
+   `GetCursorPos`, return a fixed point, see whether the cursor obeys and
+   whether the game fights back.
 
 Then Checkpoint 2 with the owner.
+
+Per `PROJECT_OVERVIEW.md` section 7a, Stage 2 is also where the shared-layer
+structure gets set, so the directory layout chosen there is load-bearing for
+three later ports.
 
 ---
 
@@ -202,3 +265,9 @@ Then Checkpoint 2 with the owner.
   do not extend it — the game's own 2D rendering stays untouched.
 - Three spikes (S1, S2, S3) exist because three things are genuinely unknown.
   S1 is now expected to pass and S3 is the one to worry about.
+- **This port is the first of four.** RA2, StarCraft BW and Tiberian Sun were
+  measured on 2026-11-01 and share AoE2's integration surface exactly —
+  `DirectDrawCreate`, no Direct3D, no DD7, 8-bit palettized, `GetCursorPos`
+  with no DirectInput. Write the mod as a **shared layer plus an adapter**;
+  see `PROJECT_OVERVIEW.md` section 7a and `Docs/FutureGames/README.md`. The
+  cost of getting this wrong is paid three times over.

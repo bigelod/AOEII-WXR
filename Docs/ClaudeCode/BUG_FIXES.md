@@ -33,9 +33,14 @@ stack is exhausted. Wine's builtin ddraw is a `.dll.so`, so there is no PE
 file to copy aside and rename — the usual escape hatch does not exist.
 
 **Status:** avoided by design. `PROJECT_OVERVIEW.md` section 4 moves the
-injection vector to `version.dll` + MinHook, which never impersonates a module
-whose functionality we need. If a `ddraw` proxy is ever revisited, the real
-module must be resolved by something other than its name.
+injection vector away from `ddraw.dll` altogether. As of 2026-11-01 the mod
+ships as **`d3d9.dll`** (`PROJECT_OVERVIEW.md` section 4), which escapes this
+trap properly rather than merely avoiding it: **DXVK's `d3d9.dll` is an
+ordinary renameable PE file**, so the real implementation can be shipped
+alongside under its own name and loaded explicitly, where Wine's builtin
+`ddraw` is a `.dll.so` with no PE to rename. `version.dll` remains on the
+fallback list. If a `ddraw` proxy is ever revisited, the real module must be
+resolved by something other than its name.
 
 ### 2. The vtable indices are correct — recorded so nobody re-derives them
 
@@ -178,9 +183,9 @@ the flipping surface on every frame. A full blocking lock of a primary surface
 is a performance cliff on real hardware and a likely stall under Wine, where
 it may also fail outright or contend with the runtime's own window capture.
 
-**Fix:** treat it as one of the three candidates in Spike S3, not as the
-chosen design. Lock a dirty rect rather than the whole surface if this route
-survives at all.
+**Status: moot on the primary path.** Under the revised architecture
+(`PROJECT_OVERVIEW.md` section 4) cnc-ddraw owns DirectDraw and we never lock
+a surface. On the fallback path: lock a dirty rect, never the whole primary.
 
 ### 11. Two presenters on one window, with no evidence either survives
 
@@ -188,8 +193,11 @@ survives at all.
 presenting its own D3D11 swapchain on the same HWND. This may work, may
 flicker, or may deadlock — it has never been run.
 
-**Status:** promoted from a bug to **Spike S3**, with three ranked answers.
-It is the one architectural unknown that reading cannot settle.
+**Status: closed by design, and this was the project's largest unknown.**
+Under the revised architecture there is exactly one D3D9 device — cnc-ddraw's
+ — and we hook its `Present` rather than competing with it. Spike S3 now
+confirms the device exists rather than asking who wins a fight over the
+window. See `PROJECT_OVERVIEW.md` section 4b.
 
 ### 12. One global `Real_*` pointer per hooked method, across all vtables
 
@@ -239,11 +247,11 @@ runs from `age2_x1/age2_x1.exe` — version resource `AGE2_X1.EXE`,
 2001 **[measured]**.
 
 Treat every inherited address, offset and exe name as suspect for two
-independent reasons: the inspected exe is a **no-CD repack** carrying four
-appended sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch`) that a
-pristine 1.0c does not have, and the **UserPatch question is still open**
-(`PROJECT_OVERVIEW.md` section 2a) — if UserPatch is installed later, it runs
-from a *different executable* again and the offsets move a third time.
+reason: the inspected exe is a **no-CD repack** carrying four appended
+sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch`) that a pristine
+1.0c does not have, so published stock-1.0c addresses were never going to
+match. (UserPatch, which would have moved them a third time, is out of scope
+— `PROJECT_OVERVIEW.md` section 2a.)
 
 ### 16. One entry in the MetaAI list is not a bug fix at all
 

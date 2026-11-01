@@ -78,3 +78,16 @@ Testing/
 *.scx
 *.mgx
 *.mgz
+
+# Later ports (Docs/FutureGames): same rule, more formats.
+*.mix
+*.MIX
+*.mpq
+*.MPQ
+*.shp
+*.vxl
+*.hva
+*.grp
+*.aud
+*.vqa
+*.bag
