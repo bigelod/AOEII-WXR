@@ -38,9 +38,11 @@
 *.out
 *.app
 
-# Build directories
-build/
-Build/
+# Build directories. build/ holds the build and deploy SCRIPTS, which are
+# source and are tracked; only its output is ignored.
+# (no bare Build/ line: ignore matching is case-insensitive on Windows, so it
+# silently re-ignored build/ and the scripts with it.)
+build/out/
 build-*/
 
 # CMake generated files
@@ -91,3 +93,5 @@ Testing/
 *.aud
 *.vqa
 *.bag
+
+Release/

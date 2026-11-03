@@ -11,7 +11,7 @@
 | Phase | **Reconnaissance done.** No code, nothing of ours on hardware |
 | Runs in WinlatorXR? | **Yes, as supplied** **[owner]** — but *with cnc-ddraw installed*. Whether it runs without it is Stage T0b |
 | Gate | AoE2 **Milestone 6** — a tabletop with head tracking the owner confirms feels locked |
-| Position in the family | **recommended second port** (`../README.md` section 3) |
+| Position in the family | **ranked 2nd of the four later ports** (`../README.md` section 3) — and the **first real portability test**, being the first on a different engine |
 | First action when unblocked | **Stage T0b** — does `Game.exe` run with cnc-ddraw removed? Needs no code |
 
 There is no `BUG_FIXES.md` in this folder because there is no code to have
@@ -41,7 +41,8 @@ The path is **deliberately not recorded in this repository**.
 - `DDRAW.dll` → `DirectDrawCreate` only. **No Direct3D import at all.**
 - **No DirectDraw interface GUID appears anywhere in the binary**, so the game
   uses `IDirectDraw` / `IDirectDrawSurface` **version 1** and nothing else.
-  The cleanest interception target of the four games.
+  Tied with SWGB's expansion exe as the cleanest interception target of the
+  five games.
 - Mouse via `GetCursorPos`; **no DirectInput, no raw input** — the AoE2 laser
   pointer hook transfers directly.
 - Carries `.p_text` / `.p_rdata` / `.p_data` / `.p_bss` patch sections.

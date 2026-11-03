@@ -139,6 +139,37 @@ reads the mouse through plain Win32 `GetCursorPos` and imports no DirectInput
 at all **[measured]**, so what was route 3 is now route 1 and the spike is
 expected to confirm rather than discover.
 
+**There is a competitor for the cursor, and it is not ruled out.** cnc-ddraw
+can clip, scale and reposition the pointer itself, so a second hand lands on
+the same object before we write a line. Measured against the **7.1.0.0** ini
+actually deployed, its `[age2_x1]` profile is:
+
+```ini
+[age2_x1]
+nonexclusive=true
+adjmouse=true
+```
+
+- **`adjmouse=true`** — "automatic mouse sensitivity scaling… adjusted
+  according to the size of the window", and only active when stretching is on.
+  Since our whole design stretches the game into a 3D surface, assume it is
+  active.
+- **`devmode=false`** (the `[ddraw]` default) — the comment reads "developer
+  mode (**don't lock the cursor**)", so false means cnc-ddraw **is** locking
+  the cursor to the window. A `ClipCursor` we did not call.
+- **`nonexclusive=true`** — in our favour: no fullscreen-exclusive device.
+
+**This corrects an earlier note in this file** that cited `handlemouse=false`
+and called the competitor ruled out. That option belongs to the **1.1.4.x**
+lineage and does not exist in 7.x; the reading came from a stale
+`cnc-ddraw.ini` left beside a 7.1.0.0 binary. The conclusion inverts: cnc-ddraw
+is in the cursor's path by default.
+
+**So the spike must separate three layers, not two.** Before blaming our hook,
+re-run with `devmode=true` and `adjmouse=false` set under `[age2_x1]`. If the
+pointer behaves only then, the fix is configuration, and that configuration
+becomes part of the declared prerequisite rather than a change to our code.
+
 1. **Hook `GetCursorPos`** and return a fixed point. Does the game's cursor
    follow *our* number? An IAT hook on a documented function, with nothing in
    Wine or X11 getting a vote. Expected to work.
@@ -168,19 +199,45 @@ out now than at Stage 7.
 
 ## Stage 3 — Own the window
 
-Still no VR. Strip `WS_CAPTION | WS_THICKFRAME | WS_BORDER`, size to screen
-metrics, **re-apply every frame** because engines rebuild windows.
+**Largely already satisfied, by configuration rather than by code
+[measured].** This stage was written to strip `WS_CAPTION | WS_THICKFRAME |
+WS_BORDER` and re-apply it every frame. Do not write that code without first
+re-checking whether it is still needed — on the stack we now run, it is not.
 
-This is a prerequisite for the sync pixel, not a cosmetic step: with chrome in
-the corner the runtime samples the chrome and head tracking silently degrades.
+**The requirement was never "a window". It was "not fullscreen-exclusive".**
+An exclusive device changes the display mode, which is the thing that breaks
+window capture and the sync pixel. cnc-ddraw already prevents it: its
+`[age2_x1]` profile and its global default both set
 
-Watch for the engine fighting back. Genie is from the era of exactly the
-consistency checks `TIPS.md` warns about, and AoE2 in particular is known for
-opinions about its display mode. If it fights a per-frame fix and wins, prefer
-letting the container size do the work.
+```ini
+nonexclusive=true   ; disable fullscreen-exclusive for direct3d9/opengl
+```
+
+and our own log confirms the result from inside the process —
+`CreateDevice: ... windowed=1` — even though the ini says `windowed=false`
+and `fullscreen=false`. That combination is borderless fullscreen: a windowed
+device filling the display, with no mode switch. Exactly what the stage was
+asking for, reached without us touching a window style.
+
+**So `nonexclusive=true` joins `renderer=direct3d9` as part of the declared
+prerequisite configuration**, not an incidental setting. If it is ever turned
+off, the device becomes exclusive and both the capture and our hook are at
+risk.
+
+What actually remains of this stage:
+
+1. **Verify on device** that the captured image has no chrome and no letterbox
+   the game did not ask for. The sync pixel lands in the top-left corner, so
+   anything occupying that corner degrades head tracking silently.
+2. **Decide the container resolution**, per the two-resolution split in
+   `PROJECT_OVERVIEW.md` section 6. This is the real work of the stage.
+3. **Do not add window management of our own.** It would fight cnc-ddraw for
+   ownership of a window neither of us created, and the current arrangement
+   already measures correct.
 
 > ### CHECKPOINT 3 — on the device
-> Is the game filling the whole view with no title bar?
+> Is the game filling the whole view with no title bar, and is the top-left
+> corner clean enough to put the sync pixel in?
 
 ---
 
@@ -785,7 +842,7 @@ One change per deploy.
 | ~~Palettized surface mishandled~~ | **closed on the primary path** | cnc-ddraw converts the 8-bit surface for us. Returns in full on the fallback path, where it is the measured main path; `BUG_FIXES.md` item 3 |
 | **Injection vector does not load under Box86/Wine** | medium | Checkpoint 2 proves the vector before anything is built on it; two ranked fallbacks |
 | **The engine fights the borderless window** | medium | expect it (`TIPS.md`); prefer the container size doing the work over a per-frame fight |
-| **Published offsets do not match this binary** | **certain** | the supplied exe is a no-CD repack with four appended sections, so published stock-1.0c addresses were never going to match. Treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
+| **Published offsets do not match this binary** | **certain** | the supplied exe is a no-CD repack with two extra sections (`.pdata`, `.patch`; the `THIS_*` and `Inf32Dat` sections are standard Genie, corrected 2026-11-02), so published stock-1.0c addresses were never going to match. Treat every inherited address as wrong; re-find with Cheat Engine. Never ship a hardcoded offset without a sanity check and a graceful failure |
 | **The table is unreadable at playable resolutions** | medium | judged at Checkpoint 6, early, where the answer can still change the design |
 | **Tuned values do not transfer from tester to device** | medium | usually a frame-of-reference problem, not precision. If a value only works where it was found, fix the frame |
 | **A saved config overrides a shipped default** | certain, eventually | say so explicitly when handing over every build |

@@ -1,0 +1,19 @@
+; AOEII-WXR - export names for the d3d9.dll proxy.
+;
+; Required, not optional: these are all __stdcall, so without a .def the
+; linker would export them decorated (_Direct3DCreate9@4) and cnc-ddraw's
+; GetProcAddress("Direct3DCreate9") would return NULL. The failure looks like
+; "the wrapper silently fell back to another renderer", which is exactly the
+; kind of quiet miss BUG_FIXES is full of.
+LIBRARY d3d9
+EXPORTS
+    Direct3DCreate9
+    Direct3DCreate9Ex
+    D3DPERF_BeginEvent
+    D3DPERF_EndEvent
+    D3DPERF_SetMarker
+    D3DPERF_SetRegion
+    D3DPERF_QueryRepeatFrame
+    D3DPERF_SetOptions
+    D3DPERF_GetStatus
+    DebugSetMute

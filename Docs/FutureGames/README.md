@@ -1,16 +1,18 @@
 # FutureGames — three more classic RTS titles
 
-High-level starting plans for taking **Red Alert 2 / Yuri's Revenge**,
-**StarCraft: Brood War** and **Tiberian Sun** to standalone VR the same way
-AoE2 is going, on the same "3D tabletop with billboard sprites" idea.
+High-level starting plans for taking **Star Wars: Galactic Battlegrounds**,
+**Tiberian Sun**, **Red Alert 2 / Yuri's Revenge** and **StarCraft: Brood
+War** to standalone VR the same way AoE2 is going, on the same "3D tabletop
+with billboard sprites" idea.
 
 | Folder | Game | Measured as |
 |---|---|---|
+| [SWGB/](SWGB/) | Star Wars: Galactic Battlegrounds + Clone Campaigns | `battlegrounds_x1.exe` **1.1**, GOG — **the same Genie engine as AoE2** |
 | [RA2/](RA2/) | Command & Conquer: Yuri's Revenge | `gamemd.exe`, stock Westwood, no Ares/Phobos |
 | [StarCraftBW/](StarCraftBW/) | StarCraft: Brood War | `StarCraft.exe` **1.16.1** |
 | [TibSun/](TibSun/) | Tiberian Sun (+ Firestorm) | `Game.exe` **2.03-CnCNet-patch** |
 
-> **All four games already run in WinlatorXR as supplied** **[owner]**, which
+> **All five games already run in WinlatorXR as supplied** **[owner]**, which
 > closes `FIRST_STEPS.md` Stage 1 for every title in the family before any work
 > starts. That is an unusually good position - most ports in this family spent
 > real effort there. **One caveat, and it is not a small one:** two of these
@@ -32,28 +34,38 @@ all identical here and are not repeated per game.
 
 ---
 
-## 1. The finding that matters: all four games are the same port
+## 1. The finding that matters: all five games are the same port
 
 Each install was inspected the same way as AoE2 — PE import table plus a
 search for every DirectDraw interface GUID. All **[measured]**, 2026-11-01.
 
-| | **AoE2** 1.0c | **RA2 / YR** | **StarCraft** 1.16.1 | **Tiberian Sun** 2.03 |
-|---|---|---|---|---|
-| Bitness | 32-bit PE32 | 32-bit PE32 | 32-bit PE32 | 32-bit PE32 |
-| Image base | `0x00400000` | `0x00400000` | `0x00400000` | `0x00400000` |
-| Graphics import | `DDRAW.dll`: `DirectDrawCreate` | `DDRAW.dll`: `DirectDrawCreate` | **none in the exe** — via `storm.dll`, which loads `ddraw.dll` *dynamically* | `DDRAW.dll`: `DirectDrawCreate` |
-| Direct3D | **none** | **none** | **none** | **none** |
-| DD7 interfaces | **absent** | **absent** | **absent** | **absent** |
-| Highest DD interface reachable | DD4 / Surface4 | DD4 / Surface4 | **DD1 / Surface1** | **DD1 / Surface1** |
-| Palette API | full GDI set | — | full set, in `storm.dll` | — |
-| Mouse | `GetCursorPos` | `GetCursorPos` | `GetCursorPos` | `GetCursorPos` |
-| DirectInput | **none** | **none** | **none** | **none** |
-| Raw input | none | none | none | none |
+| | **AoE2** 1.0c | **SWGB** CC 1.1 | **RA2 / YR** | **StarCraft** 1.16.1 | **Tiberian Sun** 2.03 |
+|---|---|---|---|---|---|
+| Bitness | 32-bit PE32 | 32-bit PE32 | 32-bit PE32 | 32-bit PE32 | 32-bit PE32 |
+| Image base | `0x00400000` | `0x00400000` | `0x00400000` | `0x00400000` | `0x00400000` |
+| Graphics import | `DDRAW.dll`: `DirectDrawCreate` | `DDRAW.dll`: `DirectDrawCreate` | `DDRAW.dll`: `DirectDrawCreate` | **none in the exe** — via `storm.dll`, which loads `ddraw.dll` *dynamically* | `DDRAW.dll`: `DirectDrawCreate` |
+| Direct3D | **none** | **none** | **none** | **none** | **none** |
+| DD7 interfaces | **absent** | **absent** | **absent** | **absent** | **absent** |
+| Highest DD interface reachable | DD4 / Surface4 | **DD1** (expansion exe); DD4 (base) | DD4 / Surface4 | **DD1 / Surface1** | **DD1 / Surface1** |
+| Palette API | full GDI set | **full GDI set, same 28 calls** | — | full set, in `storm.dll` | — |
+| Mouse | `GetCursorPos` | `GetCursorPos` | `GetCursorPos` | `GetCursorPos` | `GetCursorPos` |
+| DirectInput | **none** | **none** | **none** | **none** | **none** |
+| Raw input | none | none | none | none | none |
+| Wrapper installed | none | **none** | none | `WMode.dll` | cnc-ddraw |
+| Copy protection | no-CD repack | **none (GOG)** | **SafeDisc remnants** | `SFNoCD.dll` | CnCNet patch |
 
-Four games, four studios, three engines, 1995–2001 — and **one integration
+Five games, four studios, three engines, 1998–2002 — and **one integration
 surface**: enter at `DirectDrawCreate`, 8-bit palettized surfaces, DirectDraw
 version 1-era interfaces, no Direct3D anywhere, and a mouse read through
 plain Win32 `GetCursorPos`.
+
+**And one of the five is not merely similar — it is the same program.** SWGB
+is a commercial total conversion of AoE2's Genie engine, and the import table
+says so: the same three `VERSION.dll` functions, the same two from
+`MSVFW32.dll`, the same twelve from a renamed `winmm`, the same single
+`DDRAW` import, the same `DSOUND` / `DPLAYX` / `IMM32` / `ADVAPI32` / `ole32`
+/ `WSOCK32` sets, the same 28 `GDI32` calls, the same non-standard sections
+and the same folder layout. See `SWGB/PROJECT_OVERVIEW.md` section 2a.
 
 ### What follows from that
 
@@ -93,7 +105,7 @@ condition to clear, not a constraint to design around.
 
 | Install | What is there |
 |---|---|
-| **Tiberian Sun** | `ddraw.dll` = **cnc-ddraw 1.1.4.15** (cncnet.org), configured `Renderer=gdi`; plus leftover `aqrit.cfg` and a `cnc-ddraw.ini` carrying per-game profiles |
+| **Tiberian Sun** | `ddraw.dll` = **cnc-ddraw 1.1.4.15** (cncnet.org), configured `Renderer=gdi`; plus leftover `aqrit.cfg` and a `cnc-ddraw.ini` carrying per-game profiles. **That build has no Direct3D 9 renderer — GDI and OpenGL only [measured]** — so for this family it is not a wrapper to keep and reconfigure but one to **replace** with cnc-ddraw 6.x or newer |
 | **StarCraft** | `WMode.dll` / `WMode_Fix.dll` — a windowed-mode wrapper |
 | **RA2**, **AoE2** | none active - and both already run in WinlatorXR, so for these two the wrapper question is closed before it is asked **[owner]** |
 
@@ -108,7 +120,7 @@ question is narrower and more interesting:
 | | Write our own | Fork cnc-ddraw |
 |---|---|---|
 | Starting point | the AoE2 code, which we will have written anyway | a mature, open-source wrapper with D3D9, OpenGL and GDI backends, upscaling, windowed handling and a decade of per-game bug fixes |
-| Already supports these games | we are proving it | **yes, explicitly** — its bundled profile list includes `[C&C95]`, `[ra95]`, `[EMPIRES2]` and **`[age2_x1]`**, so all four titles are already in its compatibility matrix |
+| Already supports these games | we are proving it | **yes, explicitly — all five.** Its bundled profile list carries `[C&C95]`, `[ra95]`, `[EMPIRES2]`, `[age2_x1]`, `[SUN]`, `[ra2]`, `[gamemd]` and **`[battlegrounds]` / `[battlegrounds_x1]`**, the last two commented "Star Wars: Galactic Battlegrounds" **[measured, 1.1.4.15 ini]** |
 | Code we control | all of it | a fork to keep rebasing |
 | Fit to the stack | built for Box86/Wine from day one | built for desktop Windows; its backends are another thing to validate inside the container |
 | Licence | ours | must be checked before any release |
@@ -125,7 +137,7 @@ frame, whoever produced it. Full reasoning in
 
 For this family specifically it removes:
 
-- **the 8-bit palette conversion**, in all four games;
+- **the 8-bit palette conversion**, in all five games;
 - **all DirectDraw interception** — the DD1-vs-DD4 question in section 1
   becomes a fallback-path detail;
 - **the two-presenters problem**, which was the largest unknown in the AoE2
@@ -147,7 +159,7 @@ BepInEx. Depend only on `Present` semantics, never on its internals, and log
 the renderer in use so a missing D3D9 device fails loudly.
 
 Its source is still the best available reference for *what breaks* in these
-four games' DirectDraw usage, and that knowledge remains worth more than the
+five games' DirectDraw usage, and that knowledge remains worth more than the
 code.
 
 **Still remove the *other* wrappers before testing.** `WMode.dll` in the
@@ -161,24 +173,35 @@ run without them.
 
 ## 3. Which one to do second
 
-Ranked by how much of the AoE2 work transfers unchanged:
+Ranked by how much of the AoE2 work transfers unchanged. **Revised 2026-11-02**
+when SWGB was measured — it displaces Tiberian Sun from second place.
 
-1. **Tiberian Sun.** The simplest integration surface of the four — DirectDraw
-   version 1 only, `DirectDrawCreate`, `GetCursorPos`. Already CnCNet-patched,
-   so high and custom resolutions are solved. The experience of removing
-   cnc-ddraw here also answers the wrapper question for the whole family.
-2. **Red Alert 2 / Yuri's Revenge.** Same interface profile as AoE2 (DD1/2/4),
+1. **Star Wars: Galactic Battlegrounds.** The **same engine as AoE2**,
+   measured rather than assumed. Nothing in the `ddraw.dll` slot to remove, no
+   copy protection, GOG build. The adapter reduces to the HUD rectangles. And
+   uniquely, the *reverse engineering* transfers: whatever AoE2 establishes
+   about reading unit state from memory describes structures of the same shape
+   here, which is worth more than everything else on this list combined if the
+   billboard phase succeeds.
+2. **Tiberian Sun.** The simplest integration surface of the Westwood/Blizzard
+   group — DirectDraw version 1 only, `DirectDrawCreate`, `GetCursorPos`.
+   Already CnCNet-patched, so high and custom resolutions are solved. **This
+   is the first real portability test**, because it is the first port on a
+   different engine.
+3. **Red Alert 2 / Yuri's Revenge.** Same interface profile as AoE2 (DD1/2/4),
    and it shares the Tiberian Sun engine lineage, so the TS adapter is most of
    it. Carries SafeDisc remnants, which is the one new risk.
-3. **StarCraft: Brood War.** The odd one out architecturally — the executable
-   imports nothing but `storm.dll` by ordinal, and Storm owns the rendering
-   and loads `ddraw.dll` dynamically. Everything above the wrapper still
-   transfers, but the injection and interception work is its own problem.
+4. **StarCraft: Brood War.** Architecturally the odd one out — the executable
+   imports nothing but `storm.dll` by ordinal, and Storm owns the rendering.
+   The revised architecture mostly dissolves that (section 2), so what keeps
+   it last is its audience: the largest of the five, and therefore the highest
+   release bar and the worst candidate for a learning exercise.
 
-Tempting to reorder on audience size, where StarCraft wins easily. Resist it
-for the *second* port and revisit for the third: the second port's job is to
-prove the shared layer is actually shared, and it should be the one least
-likely to be derailed by something game-specific.
+**The one caution about going SWGB-second: do not over-read a success.** It
+proves the layer travels across *one engine*, which is nearly the null
+hypothesis. Tiberian Sun is what proves it travels across the *family*. Run
+SWGB second because it is cheap and its findings transfer — then run Tiberian
+Sun to learn whether the layering is actually right.
 
 ---
 

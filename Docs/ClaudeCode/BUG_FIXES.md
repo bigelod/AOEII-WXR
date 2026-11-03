@@ -247,10 +247,17 @@ runs from `age2_x1/age2_x1.exe` — version resource `AGE2_X1.EXE`,
 2001 **[measured]**.
 
 Treat every inherited address, offset and exe name as suspect for two
-reason: the inspected exe is a **no-CD repack** carrying four appended
-sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch`) that a pristine
-1.0c does not have, so published stock-1.0c addresses were never going to
-match. (UserPatch, which would have moved them a third time, is out of scope
+reason: the inspected exe is a **no-CD repack** carrying two extra sections a
+pristine 1.0c does not have — `.pdata` and `.patch` — so published
+stock-1.0c addresses were never going to match.
+
+> **Corrected 2026-11-02.** This item previously listed `THIS_COD…`,
+> `THIS_DAT…` and `Inf32Dat…` among the repack's additions. They appear in a
+> clean GOG build of **both** Star Wars: Galactic Battlegrounds executables,
+> which run the same Genie engine, so they are **standard Genie sections** and
+> not evidence of tampering. The conclusion stands on `.pdata` and `.patch`
+> alone; the evidence for it was overstated. See
+> `Docs/FutureGames/SWGB/PROJECT_OVERVIEW.md` section 2a. (UserPatch, which would have moved them a third time, is out of scope
 — `PROJECT_OVERVIEW.md` section 2a.)
 
 ### 16. One entry in the MetaAI list is not a bug fix at all
@@ -259,3 +266,77 @@ match. (UserPatch, which would have moved them a third time, is out of scope
 instead"* — a tooling limitation of that session, recorded as a code fix. Not
 carried forward. Noted only because it is a reminder to keep this file for
 defects in **our** code, so that it stays worth reading.
+
+---
+
+## Defects in our own code
+
+The register from here down is for this project's code, found by running it.
+
+### 17. `LoadLibrary` failure logged without a reason
+
+**Found 2026-11-02, on the first deploy. Fixed the same day.**
+
+`LoadReal()` logged `real d3d9: <path> -> 00000000` and then `FATAL: no real
+d3d9 could be loaded`, with no error code. The cause was a 64-bit
+`d3d9_real.dll`, but the log could not distinguish that from a missing file,
+a missing dependency, or a blocked load — so the owner reasonably concluded
+"DXVK makes it mad" when DXVK was blameless.
+
+On a standalone headset there is no debugger and no way to inspect a file by
+hand, so **a failure the log cannot explain costs a whole deploy cycle**. Now
+it reads the candidate's PE machine type before loading, and decodes the two
+error codes that matter:
+
+- `193` `ERROR_BAD_EXE_FORMAT` — wrong architecture
+- `126` `ERROR_MOD_NOT_FOUND` — the file loaded but one of *its* dependencies
+  did not; for DXVK, usually a missing 32-bit `vulkan-1.dll`
+
+**The general rule this is an instance of:** when a call can fail for more
+than one reason, the log must say which. "It failed" is not a diagnosis, and
+each ambiguous line is one more round trip to the device.
+
+### 18. Deploy guidance named a folder the archive did not have
+
+**Found 2026-11-02, after three wasted deploys.**
+
+`DEPLOY.md` said to take `x32/d3d9.dll` from the DXVK archive. The archive in
+use was packaged **Wine-style**, with `system32/` and `syswow64/` — and no
+`x32/` at all. Worse, the naming is inverted: **`system32/` holds the 64-bit
+files, `syswow64/` the 32-bit ones**, exactly as on Windows itself. Three
+consecutive deploys shipped a 64-bit DLL because the only folder name that
+*looked* right was the wrong one.
+
+Compounding it, **DXVK's version resource impersonates Windows** —
+`FileVersion` reads `10.0.17763.1 (WinBuild.160101.0800)` in both builds — so
+the properties dialog cannot tell them apart either. The only honest signals
+are the PE machine type and the file size (1.10.3: 32-bit is 3,305,486 bytes,
+64-bit is 3,002,382).
+
+Both layouts are now documented in `DEPLOY.md`, and `deploy.ps1` names both
+when it rejects a 64-bit file.
+
+### 19. Anything written only at `DLL_PROCESS_DETACH` can be lost on device
+
+**Found 2026-11-02, in the first log returned from a Quest 3.**
+
+The device log ends after the last `Reset` line: no `shutdown`, and no
+`Present frames total`. Both are written from `DLL_PROCESS_DETACH`, so on that
+run the detach either did not run or did not complete — consistent with the
+container being killed outright rather than the process exiting cleanly.
+
+> **Not yet distinguished from the benign explanation**: the log may simply
+> have been copied off the device while the game was still running. The fix
+> below is correct either way, so it was made without waiting to find out.
+> Confirm on the next device run **[owner]**.
+
+**Why it matters beyond a missing line.** The frame counter was the only
+evidence of how long we survived, and it was written exactly where it could
+not be read. The same shape of mistake gets much more expensive later: the
+XrApi socket, the final pose, and every `D3DPOOL_DEFAULT` resource would all
+be "cleaned up at detach" by default.
+
+**Rule:** on device, treat `DLL_PROCESS_DETACH` as a courtesy, not a shutdown
+path. Nothing important may be deferred to it, and liveness must be visible
+from the *body* of the log. `Present` now emits a frame count every 600 frames
+at normal level, not only under the verbose flag.

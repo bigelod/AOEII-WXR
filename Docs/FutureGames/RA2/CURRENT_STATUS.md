@@ -9,9 +9,9 @@
 | | |
 |---|---|
 | Phase | **Reconnaissance done.** No code, nothing of ours on hardware |
-| Runs in WinlatorXR? | **Yes, as supplied, with no DirectDraw wrapper installed** **[owner]** — the cleanest starting position of the three later ports |
+| Runs in WinlatorXR? | **Yes, as supplied, with no DirectDraw wrapper installed** **[owner]**. Clean on the wrapper question, but it still carries **SafeDisc remnants**, so SWGB is the cleaner start overall |
 | Gate | AoE2 **Milestone 6**, and preferably Tiberian Sun first |
-| Position in the family | **recommended third port** (`../README.md` section 3) |
+| Position in the family | **ranked 3rd of the four later ports** (`../README.md` section 3) |
 | First action when unblocked | **Stage R1** — settle whether SafeDisc objects to a foreign DLL. R0 is already done |
 
 No `BUG_FIXES.md` in this folder: there is no code to have defects in. Create
@@ -68,7 +68,7 @@ Full detail and the reasoning in [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
 3. **What resolutions does stock RA2 accept?** Weaker here than Tiberian Sun's
    CnCNet patch, and it is the main quality knob.
 4. **Can the per-cell terrain height be read?** Decides the heightmap table.
-5. **Is the frame rate affordable?** Busiest screen of the four games.
+5. **Is the frame rate affordable?** Busiest screen of the five games.
 
 ---
 
@@ -76,7 +76,7 @@ Full detail and the reasoning in [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
 
 Two things, recorded so they are not lost:
 
-- **The sidebar.** RA2's HUD is the largest and busiest of the four titles, and
+- **The sidebar.** RA2's HUD is the largest and busiest of the five titles, and
   a player watches it continuously. Lifting it off the table and hanging it in
   space is more valuable here than anywhere else — this is the port where the
   floating HUD could be the headline feature rather than a supporting one.

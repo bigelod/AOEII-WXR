@@ -1,7 +1,7 @@
 # CURRENT_STATUS
 
-**As of 2026-10-31.** Planning plus Stage A reconnaissance complete; no code
-written yet.
+**As of 2026-11-02.** Stage 2 and Spike S3 **confirmed on a Quest 3**, on the
+full pinned stack. The project's first code has run on hardware.
 
 Read [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the goal and
 [PROJECT_PLAN.md](PROJECT_PLAN.md) for the stages this refers to.
@@ -10,20 +10,77 @@ Read [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the goal and
 
 ## The one-paragraph truth
 
-**Nothing has been built, and nothing has run on hardware** — but the game
-binary has now been read, and that turned five assumptions into measurements.
-The unmodified game runs cleanly in a WinlatorXR container **[owner]**,
-closing Stage 1. The inherited `ddraw.dll` skeleton in
-`Docs/MetaAI/Phase1Proj` is now known to be **unsalvageable as written**: it
-hooks the DirectDraw 7 interfaces, and the game's executable does not contain
-the DD7 GUIDs at all, so it could never have intercepted a single call. In
-exchange, the project's scariest risk got much smaller — the game reads its
-mouse through plain Win32 `GetCursorPos` with no DirectInput, so the laser
-pointer that the whole input design rests on is a straightforward IAT hook.
-The reconnaissance also found that **UserPatch 1.5 was not installed** on the
-copy supplied, though the project was specified with it — and that
-requirement has since been **dropped** **[owner]**, so the target is now
-fixed and nothing is blocked.
+**Spike S3 is answered yes, in Age of Empires II itself.** With cnc-ddraw
+7.1.0.0 on `renderer=direct3d9`, our `d3d9.dll` loaded, hooked
+`IDirect3D9::CreateDevice` and then `IDirect3DDevice9::Present`, survived five
+device resets, and presented **603 frames** through our hook across a 49-second
+session — with the probe rectangle visible in the menu **[owner, screenshot]**.
+So the architecture in section 4 of `PROJECT_OVERVIEW.md` holds end to end: the
+game's DirectDraw really does arrive as a D3D9 backbuffer we can draw into, and
+`Present` is the injection point. That removes the project's one unresolved
+critical-path unknown about the renderer. **It ran on Windows, not on the
+headset** — Wine, Box86 and the container are all still untested, and the
+remaining critical-path unknown is now Spike S1, the pointer, which got
+*harder* on inspection (see below). Everything below this paragraph about the
+binary remains true.
+
+---
+
+## What the first run established
+
+| Observation | What it means |
+|---|---|
+| 603 frames through our `Present` | the hook is stable, not a one-shot |
+| 5 × `Reset` in 49 seconds, including at startup | **the device is reset routinely.** Anything we later allocate in `D3DPOOL_DEFAULT` must be released before `Reset` and rebuilt after, or the reset fails and takes the game with it. This is a Stage 6 constraint, discovered free |
+| `CreateDevice: 0x0` — backbuffer width and height both **zero** | cnc-ddraw passes 0 and lets D3D9 infer the size from the window. **We cannot learn the table's texture resolution from the present parameters**; it has to come from the swapchain or the backbuffer surface description. Section 6's two-resolution split needs that correction |
+| the log landed beside whichever executable was launched — root for `empires2.exe`, `age2_x1\` for `age2_x1.exe` | **the DLL follows the EXE, not the data.** Deploy to the folder of the executable being launched; deploying to both costs nothing and the log's own location reports which one won |
+| `nonexclusive=true` in the deployed profile | no fullscreen-exclusive device, which is what we want |
+
+**Confirmed on the target.** A second run against `age2_x1.exe` — The
+Conquerors, the executable named in the hard constraints — produced the same
+result: device hooked, five resets survived, 50 frames through our `Present`,
+probe visible **[owner]**. S3 is closed for the target on Windows. It remains
+open under Wine and on device.
+
+**Confirmed on the pinned renderer too.** A later pair of runs replaced
+Microsoft's D3D9 with **DXVK 1.10.3** (32-bit) as `d3d9_real.dll`, and both
+executables behaved identically: device hooked, resets survived, probe visible
+**[owner]**. The stack now proven end to end is the one that will ship —
+
+```
+age2_x1.exe -> cnc-ddraw 7.1.0.0 (direct3d9) -> ours -> DXVK 1.10.3 -> Vulkan
+```
+
+— and it has since run on the **Quest 3 itself** **[owner]**, inside
+WinlatorXR, under Wine and Box86, from `D:\Win\Age of Empires II\`. The
+device log is identical to the desktop one line for line: same architecture
+check, same `CreateDevice`, same hooks, same resets. **Wine, Box86 and the
+container introduced no difference at all** — the single most load-bearing
+assumption in `PROJECT_OVERVIEW.md` section 4, now measured rather than
+argued.
+
+Getting there cost three deploys to a packaging trap; see `BUG_FIXES.md`
+#17-18. The device run then produced #19 immediately: its log ends
+mid-session with no `DLL_PROCESS_DETACH`, so **nothing important may be
+deferred to shutdown** — a rule that would have cost far more had it been
+found at Stage 4 with a socket open.
+
+---
+
+## What exists in the tree
+
+| Path | What it is |
+|---|---|
+| `src/log.h`, `src/log.cpp` | the log. Build stamp on line 1, written beside the DLL, verbose behind a flag file, flushed every line |
+| `src/d3d9_proxy.cpp` | the proxy, the two hooks, the probe rectangle, and the cnc-ddraw report on line 2 |
+| `src/d3d9.def` | undecorated export names. Without it every export is `_Direct3DCreate9@4` and `GetProcAddress` returns NULL |
+| `build/build.bat` | compile. Refuses to run if `cl.exe` is not targeting x86 |
+| `build/deploy.ps1` | copy. Refuses a binary older than the newest source file; prints `match=True` only on a SHA-256 match |
+| [DEPLOY.md](DEPLOY.md) | **the four files to copy, and what each failure in the log means** |
+
+The game needs a 32-bit DXVK `d3d9.dll` renamed to `d3d9_real.dll` beside
+ours. That is not a convenience: the loader keys modules on file name, so once
+we are `d3d9.dll`, any request for `d3d9.dll` returns us. See `DEPLOY.md`.
 
 ---
 
@@ -34,12 +91,12 @@ fixed and nothing is blocked.
 | 0 | Feasibility assessed, intake complete | **done** |
 | 1 | Unmodified game runs in a container | **done** — runs cleanly **[owner]** |
 | A | Binary reconnaissance | **done** — findings below |
-| 2 | Code loads, logs, build stamp | **next** |
-| S1 | Spike: mouse motion from in-container | not started — *expected to pass* |
-| 3 | Borderless, display-filling window | not started |
+| 2 | Code loads, logs, build stamp | **done, on hardware** **[owner]** |
+| S1 | Spike: mouse motion from in-container | not started — **no longer expected to pass unaided.** cnc-ddraw 7.x locks and rescales the cursor by default; see `PROJECT_PLAN.md` |
+| 3 | Borderless, display-filling window | **mostly already true** — `nonexclusive=true` gives borderless fullscreen with a windowed device **[measured]**. What remains is verifying the corner is clean and choosing the container resolution; **no window-style code is planned** |
 | 4 | XrApi 0.5 client | not started |
 | 5 | Sync pixel | not started |
-| S3 | Spike: can we present our own frame | not started — **the live unknown** |
+| S3 | Spike: can we present our own frame | **yes — closed, on a Quest 3** **[owner]**. cnc-ddraw 7.1.0.0 on `direct3d9` into DXVK 1.10.3; desktop and device logs agree line for line |
 | 6 | **The tabletop, head tracking locked** | not started |
 | 7 | Laser pointer | not started |
 | 8 | Floating HUD | not started |
@@ -113,7 +170,7 @@ semantics. Full reasoning in `PROJECT_OVERVIEW.md` section 4.
 | 8-bit palette conversion — the *measured* main path | cnc-ddraw converts for us |
 | Two presenters on one window — was the largest live unknown | one device, and we are in it |
 | DirectDraw interception, DD1-vs-DD4, `QueryInterface` wrapping | we never see DirectDraw |
-| Per-game DirectDraw quirks across four titles | inherited as fixed |
+| Per-game DirectDraw quirks across five titles | largely inherited as fixed |
 
 **The cost:** a hard dependency on cnc-ddraw, accepted and documented as a
 pinned prerequisite **[owner]**, like the Interstellar Marines port requires
@@ -162,7 +219,8 @@ own mode only sets the table's texture sharpness. `PROJECT_OVERVIEW.md`
 section 6.
 
 Offsets still need re-finding for Stage 11, but for a different reason: the
-supplied exe is a no-CD repack with four appended sections, so published
+supplied exe is a no-CD repack with two extra sections (`.pdata`, `.patch`),
+so published
 stock-1.0c addresses were never going to match anyway.
 
 **No stage is blocked.** This was the last open question.
@@ -247,7 +305,7 @@ Then Checkpoint 2 with the owner.
 
 Per `PROJECT_OVERVIEW.md` section 7a, Stage 2 is also where the shared-layer
 structure gets set, so the directory layout chosen there is load-bearing for
-three later ports.
+four later ports.
 
 ---
 

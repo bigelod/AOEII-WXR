@@ -46,7 +46,8 @@ DD2 and DD4 were at least present. Tiberian Sun cannot `QueryInterface` for
 any DirectDraw interface, so it uses exactly what `DirectDrawCreate` hands it:
 **`IDirectDraw` and `IDirectDrawSurface`, version 1**.
 
-That makes this the cleanest interception target of the four games. One
+That makes this — tied with SWGB's expansion executable — the cleanest
+interception target of the five games. One
 interface pair to wrap, no version negotiation, no `DDSURFACEDESC` versus
 `DDSURFACEDESC2` branch.
 

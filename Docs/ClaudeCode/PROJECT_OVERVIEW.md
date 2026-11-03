@@ -66,7 +66,7 @@ precisely for this genre. So:
 |---|---|
 | Game, version, patch level | AoK base + The Conquerors **1.0c** — confirmed from the version resource: `AGE2_X1.EXE`, FileVersion `00.07.26.0809`, "Age of Empires II Expansion", Microsoft Corp. 2001 **[measured]**. **UserPatch is out of scope** — decision taken, section 2a |
 | Executable | `age2_x1/age2_x1.exe`, 3,145,728 bytes. **Not `empires2.exe`**, which is the base-game binary **[measured]** |
-| Store or distribution | A no-CD/repack build: the exe carries four non-standard appended sections (`THIS_COD…`, `THIS_DAT…`, `Inf32Dat…`, `.patch` at 0x6c000 bytes) alongside the original 2001 link timestamp **[measured]**. Consequence: **this is already a modified binary**, so published offsets for a pristine 1.0c need re-finding regardless of patch level |
+| Store or distribution | A no-CD/repack build: the exe carries **two** extra sections a pristine 1.0c does not — `.pdata` and `.patch` (0x6c000 bytes) — alongside the original 2001 link timestamp **[measured]**. (`THIS_COD…`, `THIS_DAT…` and `Inf32Dat…` are **standard Genie sections**, corrected 2026-11-02 against a clean GOG SWGB build — see `Docs/FutureGames/SWGB/PROJECT_OVERVIEW.md` 2a.) Consequence unchanged: **this is already a modified binary**, so published offsets for a pristine 1.0c need re-finding |
 | Install path (target) | `D:/VR/AoE2-WXR` — does not exist yet, will be created **[owner]** |
 | Install path (for inspection) | A local path on the owner's machine, **deliberately not recorded in this repository** **[owner]** |
 | Bitness | **32-bit confirmed** — PE32, machine `0x014c` (i386), image base `0x00400000`, subsystem 2 (GUI) **[measured]** |
@@ -377,7 +377,7 @@ Four of the project's named risks disappear, not shrink:
 | **8-bit palette conversion** — `BUG_FIXES.md` item 3, measured as the *main* path (section 2d), would have produced garbage on frame one | **gone.** cnc-ddraw converts to a D3D9 texture for us |
 | **Two presenters on one window** — Spike S3, which this document called the largest live unknown | **gone.** One D3D9 device, and we are inside it |
 | **DirectDraw interception** — the DD1-vs-DD4 question (section 2b), `QueryInterface` wrapping, per-game surface quirks | **gone.** We never see DirectDraw |
-| **Per-game DirectDraw bugs** across four titles | **inherited as fixed.** cnc-ddraw ships profiles for all four, including `[age2_x1]` and `[EMPIRES2]` |
+| **Per-game DirectDraw bugs** across five titles | **largely inherited as fixed.** cnc-ddraw's bundled profile list covers **every one of the five**, SWGB included (`[battlegrounds]`, `[battlegrounds_x1]`) alongside `[age2_x1]`, `[EMPIRES2]`, `[C&C95]`, `[ra95]`, `[SUN]`, `[ra2]` and `[gamemd]` **[measured, 1.1.4.15 ini]**. For all four Genie entries the profile is the same single line, `handlemouse=false` |
 
 And for the wider family (`Docs/FutureGames/`), it removes the single largest
 risk in the StarCraft port: Storm owning the renderer and loading `ddraw.dll`
@@ -390,7 +390,7 @@ layers, and it is right to — but it is warning about *stacking*, and this is
 not a stack. `ddraw -> cnc-ddraw -> D3D9 -> DXVK -> Vulkan` is exactly as deep
 as `ddraw -> us -> D3D9 -> DXVK -> Vulkan`. There is one translation step
 either way; the only question is who writes it, and the answer "someone who
-already did, for these four games specifically" is a good one.
+already did, for these games specifically" is a good one.
 
 **The injection vector becomes obvious, and the trap that killed the inherited
 plan does not exist here.** Our mod ships as **`d3d9.dll`** next to the game.
@@ -415,7 +415,15 @@ internals are not a stable API, so:
 
 - **Pin the version and state it in the README.** Record which build was
   verified. A player on a different one is the first thing to check when a
-  report makes no sense.
+  report makes no sense. **Verified: 7.1.0.0.** The `1.1.4.x` lineage has no
+  Direct3D 9 renderer at all and fails silently — see `DEPLOY.md`.
+
+**The same reasoning pins DXVK at 1.10.3** **[owner]**. Taking the container's
+own build would track whatever WinlatorXR ships and make the desktop and the
+headset two different renderers; pinning makes them one. The cost is that a
+container upgrade could leave our DXVK older than its Vulkan loader — cheap to
+re-pin, and visible immediately rather than as a drifting behavioural
+difference.
 - **Depend only on `Present` semantics**, never on how cnc-ddraw draws. The
   design above is deliberately ignorant of its internals for this reason.
 - **Require the `direct3d9` renderer**, not `gdi`. The owner confirms D3D9
@@ -442,7 +450,8 @@ fallback, not a theoretical one.
 |---|---|---|
 | Bitness | **32-bit, Win32** | the game is 32-bit; no OpenXR runtime to load; stays in-process, which `TIPS.md` says is worth more than any benefit of 64-bit |
 | Game's 2D rendering | **untouched** | known-good under Box86/Wine; it is our texture source |
-| ddraw -> D3D9 translation | **cnc-ddraw**, pinned, declared prerequisite | four risks removed; already fixed for all four games; same layer depth as writing it ourselves |
+| ddraw -> D3D9 translation | **cnc-ddraw 7.1.0.0**, pinned, declared prerequisite | four risks removed; already fixed for all five games; same layer depth as writing it ourselves |
+| D3D9 implementation | **DXVK 1.10.3**, pinned, shipped as `d3d9_real.dll` **[owner]** | the same binary on desktop and device, so a behavioural difference between them is never the renderer. 1.10.3 asks only for Vulkan 1.1, where DXVK 2.x wants 1.3 |
 | Our hook point | **D3D9 `Present`** | the one thing that is true regardless of cnc-ddraw's internals |
 | Our module name | **`d3d9.dll`** | a real D3D9 wrapper rather than an impersonation, and DXVK's own `d3d9.dll` is a renameable PE, so the recursion trap is escapable |
 | 3D layer | **D3D9** | the June 2010 SDK is **[proven]** in `TOOLS.md`; DXVK's D3D9 path is what containers are tuned for; small, era-appropriate API |
@@ -560,7 +569,7 @@ per frame means it is dead, and no amount of work on it helps.
   world coordinates**, which screen-scraping never can, and world coordinates
   are what depth sorting, lighting and a believable table actually need. It is
   the heaviest route and the most likely to work. The supplied exe is a no-CD
-  repack with four appended sections, so published stock-1.0c offsets will
+  repack with two extra sections, so published stock-1.0c offsets will
   not match — expect to re-find them, with Cheat Engine before a
   disassembler (`TOOLS.md` rates it *"underrated for this work"*).
 - **Route B — hook the game's sprite draw.** Find the one software function
@@ -698,18 +707,20 @@ and the fallback-on-failure instinct are all the right reflexes.
 
 ## 7a. This port is the first of four — build it as a shared layer
 
-Added 2026-11-01, after inspecting three more installs
+Added 2026-11-01 and extended 2026-11-02, after inspecting four more installs
 (`Docs/FutureGames/README.md`).
 
 Red Alert 2, StarCraft: Brood War and Tiberian Sun were measured the same way
-as AoE2, and the result is striking: **all four games have the same
+as AoE2, and the result is striking: **all five games have the same
 integration surface** **[measured]**. Each is 32-bit PE32 at image base
 `0x00400000`, each enters graphics at `DirectDrawCreate`, **none** imports any
 Direct3D, **none** can reach the DirectDraw 7 interfaces, each uses 8-bit
 palettized surfaces, and **every one of them reads the mouse through plain
 Win32 `GetCursorPos` with no DirectInput and no raw input**.
 
-Four studios, three engines, 1995–2001, one interception design.
+Five games, four studios, three engines, 1998–2002, one interception design.
+And one of the five, SWGB, is the **same engine** as AoE2 rather than merely
+similar — see `Docs/FutureGames/SWGB/PROJECT_OVERVIEW.md` section 2a.
 
 **So everything in this plan from Stage 3 to Stage 10 is game-independent** —
 the borderless window, the XrApi 0.5 client, the sync pixel, the D3D9 tabletop,

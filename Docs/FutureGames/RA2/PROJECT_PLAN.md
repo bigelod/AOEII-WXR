@@ -26,7 +26,7 @@ them before the AoE2 port has validated them would be copying a hypothesis.
 - [ ] **R11** *Opportunity:* voxel vehicles (inherited from Tiberian Sun)
 
 R5 is the milestone that matters. R7 is the one that makes this port
-distinctive, because RA2's sidebar is the busiest HUD of the four games.
+distinctive, because RA2's sidebar is the busiest HUD of the five games.
 
 ---
 
@@ -34,8 +34,9 @@ distinctive, because RA2's sidebar is the busiest HUD of the four games.
 
 **R0 is done:** the game runs in a WinlatorXR container as supplied
 **[owner]**, with no DirectDraw wrapper installed. That is the cleanest
-starting position of the three later ports — nothing to remove, nothing to
-replace, and Wine's own DirectDraw already demonstrated sufficient.
+position of the Westwood/Blizzard group — nothing to remove, nothing to
+replace, and Wine's own DirectDraw already demonstrated sufficient. (SWGB is
+cleaner still, having no copy protection either.)
 
 It also *partly* answers R1 for free: the game starts, so SafeDisc is not
 blocking startup. What is still unknown is whether it objects to a **foreign

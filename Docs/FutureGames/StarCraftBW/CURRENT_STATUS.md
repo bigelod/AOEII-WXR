@@ -11,7 +11,7 @@
 | Phase | **Reconnaissance done.** No code, nothing of ours on hardware |
 | Runs in WinlatorXR? | **Yes, as supplied** **[owner]** — but *with `WMode.dll` present*. Whether it runs without it is Stage S0b |
 | Gate | AoE2 **Milestone 6**, and preferably after Tiberian Sun and Red Alert 2 |
-| Position in the family | **recommended fourth and last** (`../README.md` section 3) — the odd one out architecturally, and the title with the highest release bar |
+| Position in the family | **ranked 4th and last of the later ports** (`../README.md` section 3) — architecturally the odd one out, and the title with the highest release bar |
 | First action when unblocked | **Stage S0b** then **Spike S1** — does it run without `WMode.dll`, and will Storm load a `ddraw.dll` of ours? Neither needs much code |
 
 No `BUG_FIXES.md` in this folder: there is no code to have defects in. Create
